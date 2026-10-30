@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { cookies } from "next/headers";
 import "./globals.css";
+import SiteNav from "@/components/SiteNav";
 import { SESSION_COOKIE, verifySession } from "@/lib/web-auth";
 
 export const metadata: Metadata = {
@@ -17,32 +17,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const authed = verifySession(token);
   return (
     <html lang="en">
-      <body className="bg-zinc-50 text-zinc-900 antialiased">
+      <body className="min-h-screen bg-zinc-50 text-zinc-900 antialiased">
+        {authed && <SiteNav />}
+        <div className="min-h-[calc(100vh-220px)]">{children}</div>
         {authed && (
-          <nav className="border-b border-zinc-200 bg-white">
-            <div className="mx-auto flex max-w-2xl flex-wrap items-center gap-4 px-4 py-3 text-sm">
-              <span className="font-bold">XploClone</span>
-              <Link href="/" className="underline">
-                Generate
-              </Link>
-              <Link href="/voices" className="underline">
-                Voices
-              </Link>
-              <Link href="/keys" className="underline">
-                API keys
-              </Link>
-              <Link href="/health" className="underline">
-                Health
-              </Link>
-              <form action="/api/auth/logout" method="post" className="ml-auto">
-                <button type="submit" className="rounded border border-zinc-300 px-3 py-1">
-                  Sign out
-                </button>
-              </form>
+          <footer className="border-t border-zinc-200 bg-white">
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs text-zinc-500">
+              <span>
+                XploClone v0.1.0 · Phase 1 English MVP · Chatterbox Turbo · single-owner admin
+              </span>
+              <span>Mubashir Ali&apos;s voice only — no other voice can be added here.</span>
             </div>
-          </nav>
+          </footer>
         )}
-        {children}
       </body>
     </html>
   );

@@ -7,8 +7,11 @@ There is no signup. One owner password, set at install time.
 
 1. Install: `./install.sh` (prints the web password once — save it).
 2. Open **http://localhost:3000/login**.
-3. Enter the password. Correct → you land on Generate; wrong → 401.
+3. Enter the password. Show / Hide toggles the password visibility.
+   Correct → you land on Generate; wrong → 401 with an error message.
    Unauthenticated visits to any page redirect to `/login`.
+4. Sign out from the top nav (Sign out button, top right). Signing out
+   clears the session cookie and returns you to `/login`.
 
 If you lost the password: generate a new hash
 (`python3 -c "import hashlib; print(hashlib.sha256(b'NEW_PASSWORD').hexdigest())"`),
@@ -20,14 +23,26 @@ service. There is no password reset by email.
 1. Pick a voice: `mubashir-en-us` or `mubashir-en-gb`.
    `mubashir-ur` is shown as "in research" and is not selectable —
    the Urdu engine is gated (see `docs/URDU-SPIKE.md`).
-2. Type or paste text (max 5,000 characters — the counter shows it).
-3. Generate. You get an audio player + download (WAV).
-4. History (last 50, in your browser only) is listed under the form.
+2. Pick a style preset: Natural (recommended), Warm, Firm, or Default.
+   Advanced prosody (exaggeration, CFG, temperature, top-p, repetition
+   penalty) opens in a collapsible panel; a "Custom" badge appears if
+   you move a slider away from the preset, and "Reset to preset"
+   restores it.
+3. Type or paste text (max 5,000 characters — the counter shows it),
+   or load a sample (Greeting, Recruitment call, Long-form test).
+   Copy text and Clear text both work.
+4. Generate. You get an audio player, file size, latency, preset and
+   watermark status, plus Download WAV and Re-generate buttons.
+5. History (last 50, in your browser only) is listed under the form.
+   Each entry has Load (puts its full text, voice and preset back into
+   the form) and Delete. Clear history asks you to click again to
+   confirm. History is empty until your first generation.
 
 If a voice shows "unavailable", no reference clip is installed for
 it yet — place the clip in `api/reference/` and restart the API
 (see `docs/INSTALL.md`). Generation is rate-limited to 60 req/min
-per web session.
+per web session. If the API is down, Generate shows the error with a
+Retry button instead of failing silently.
 
 ## How to get a human voice (not AI-sounding)
 
@@ -65,8 +80,12 @@ can score high SIM and still sound wrong.
 
 ## Voices page
 
-Lists the 3 voices with language, accent, engine and status
-(`loaded` / `unavailable`). There is no way to add a voice here —
+Lists the 3 voices as cards with language, accent, engine and status
+(`Ready` / `Unavailable` / `In research`), plus a last-checked time
+and a working Refresh button. Each ready voice has a "Use this voice →"
+button that opens Generate with that voice pre-selected. Urdu's card
+explains it is disabled until the spike passes — there is no dead
+button. There is no way to add a voice here —
 XploClone serves Mubashir Ali's voice only, by design. Adding a
 voice means recording it and wiring it in code, not clicking a
 button.
@@ -74,10 +93,12 @@ button.
 ## API keys page
 
 Shows the API keys configured for the server-side proxy. Keys are
-**env-managed**: values are never shown in the UI. To rotate a key,
-generate a new key + hash, update `.env`
+**env-managed**: values are never shown in the UI. Copy buttons copy
+the API endpoint URL and a curl example (neither contains a secret).
+To rotate a key, follow the numbered rotate instructions on the page
+(generate a new key + hash, update `.env`
 (`XPLOCLONE_API_KEY` / `XPLOCLONE_API_KEY_HASH`), restart the API
-and web services. The key is for your own products (Xplogent,
+and web services). The key is for your own products (Xplogent,
 xplosole) calling `POST /v1/tts` — see `docs/API.md` for the
 curl examples. Never paste a key into a chat or a public repo.
 
@@ -85,7 +106,9 @@ curl examples. Never paste a key into a chat or a public repo.
 
 Shows API status (`ok` / readiness), device (`cuda` / `cpu`),
 engine (`turbo` / `nano`), the pinned and resolved Chatterbox
-revisions, and per-voice status. Use it to confirm which engine
+revisions, and per-voice status, as status cards with a last-checked
+time. Refresh re-fetches live from `GET /health` (via the web
+`/api/health` proxy). Use it to confirm which engine
 is actually running — CPU mode must say `engine: nano`,
 `device: cpu`. If it says Turbo on a CPU-only machine, your
 `.env` still says `XPLOCLONE_DEVICE=cuda` — fix it and restart.

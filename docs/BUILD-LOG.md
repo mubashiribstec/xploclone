@@ -386,3 +386,28 @@ mypy, numpy — the earlier `/tmp/xploclone-fix-venv` was wiped with
 - Docker builds, GPU inference, watermark survival through μ-law,
   ElevenLabs benchmark, Urdu spike, live-call streaming (Phase 3).
 - CI on GitHub: the workflow file is still not on the branch (M5).
+
+## Professional UI round (2026-10-30)
+
+Audit found 11 issues (U1–U11, see `docs/UI-CHECKLIST.md`): 5-line
+globals.css with no design system, nav with no active state, login
+with no show/hide, dead History list, no sample/copy/clear/re-generate
+controls, stale preset label after slider moves, no API-down retry,
+Voices/Health with no refresh or action, Keys with no copy buttons.
+All fixed. New: design system in `globals.css` (focus rings,
+touch-sized range thumbs, toast/fade), dark sticky nav with active
+pill + working Sign out (`components/SiteNav.tsx`), shared
+`components/ui.tsx` (CopyButton with clipboard fallback, Badge),
+Generate as a two-column workspace (text/result/history + voice/
+preset/advanced sidebar), full-text history with Load/Delete/two-step
+Clear, 3 sample buttons, temperature/top-p/repetition-penalty sliders
++ Custom badge + Reset-to-preset, new `GET /api/health` web proxy
+route (only API change; FastAPI untouched). Verification:
+`npm run typecheck` pass, `npm run build` pass (12 routes),
+`ruff check` + `ruff format --check` pass, `mypy api` clean,
+`pytest -q` 100 passed, 1 skipped. Live smoke test of the built app
+(test password hash, port 3100): login 200 / wrong password 401 /
+unauthenticated 307 to /login, all pages 200 authenticated, logout
+clears the session, `/api/voices` + `/api/health` correctly 502 with
+no API running. End-to-end audio generation in the browser still
+needs GPU + recordings — not claimed.
