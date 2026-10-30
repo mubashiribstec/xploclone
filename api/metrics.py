@@ -41,11 +41,18 @@ class Metrics:
                 self.errors_total[f"{voice_id}:{error_code}"] += 1
 
     def _percentile(self, values: list[float], pct: float) -> float:
+        # Linear interpolation (m18) — the old index lookup made p95
+        # misleading on small samples.
         if not values:
             return 0.0
         ordered = sorted(values)
-        idx = min(len(ordered) - 1, max(0, int(pct / 100.0 * len(ordered))))
-        return ordered[idx]
+        if len(ordered) == 1:
+            return ordered[0]
+        rank = pct / 100.0 * (len(ordered) - 1)
+        lo = int(rank)
+        hi = min(lo + 1, len(ordered) - 1)
+        frac = rank - lo
+        return ordered[lo] * (1.0 - frac) + ordered[hi] * frac
 
     def render_prometheus(self) -> str:
         lines = [

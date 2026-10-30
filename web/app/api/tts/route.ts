@@ -1,24 +1,42 @@
 import { NextResponse } from "next/server";
+import { allowSession, requireWebSession } from "@/lib/web-rate-limit";
 
 // Server-side proxy: the browser never talks to the GPU server and the
 // API key never ships to the browser. Both values come from the server
-// environment only.
+// environment only. Requires a valid owner web session (M1) and is
+// rate-limited per session, not just per shared server key.
 const API_URL = process.env.XPLOCLONE_API_URL ?? "http://localhost:8000";
 const API_KEY = process.env.XPLOCLONE_API_KEY ?? "";
 
 export async function POST(req: Request) {
+  const session = requireWebSession(req);
+  if (!session.ok) {
+    return NextResponse.json({ detail: "Web login required." }, { status: session.status });
+  }
+  const limited = allowSession(session.session);
+  if (!limited.allowed) {
+    return NextResponse.json(
+      { detail: "Web rate limit exceeded (60 req/min per session)." },
+      { status: 429, headers: { "Retry-After": String(limited.retryAfter) } },
+    );
+  }
   const body = await req.json().catch(() => null);
   if (!body || typeof body.voice_id !== "string" || typeof body.text !== "string") {
     return NextResponse.json({ detail: "voice_id and text are required." }, { status: 400 });
   }
-  const res = await fetch(`${API_URL}/v1/tts`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${API_KEY}`,
-    },
-    body: JSON.stringify({ voice_id: body.voice_id, text: body.text, format: "wav" }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/v1/tts`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({ voice_id: body.voice_id, text: body.text, format: "wav" }),
+    });
+  } catch {
+    return NextResponse.json({ detail: "API unavailable." }, { status: 502 });
+  }
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ detail: `API error ${res.status}` }));
     return NextResponse.json(detail, { status: res.status });

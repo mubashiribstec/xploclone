@@ -64,7 +64,8 @@ _ABBREVIATIONS = {
     "mr.": "Mister",
     "mrs.": "Missus",
     "ms.": "Miss",
-    "st.": "Saint",
+    # "st." is NOT here — it is handled in normalize_text (m2): "Main St."
+    # is a street, "St. John" is a saint. A blanket expansion is wrong.
     "ave.": "Avenue",
     "rd.": "Road",
     "no.": "number",
@@ -77,6 +78,23 @@ _ABBREVIATIONS = {
 _CURRENCY_WORDS = {"£": "pounds", "$": "dollars", "€": "euros"}
 
 _POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b")
+_ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_STREET_ST_RE = re.compile(r"(\b[A-Z][A-Za-z]*)\s+St\.")
+_REMAINING_ST_RE = re.compile(r"\bSt\.", re.IGNORECASE)
+_MONTHS = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
 _MONEY_RE = re.compile(r"([£$€])\s*(\d+)(?:\.(\d{1,2}))?\b")
 _PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 _TIME_RE = re.compile(r"\b(\d{1,2}):(\d{2})\b")
@@ -131,6 +149,16 @@ def _time_to_words(match: re.Match[str]) -> str:
     return _int_to_words(hour) + " " + _int_to_words(minute)
 
 
+def _iso_date_to_words(match: re.Match[str]) -> str:
+    """ISO YYYY-MM-DD -> spoken date, e.g. 'January five, twenty twenty six' (m2)."""
+    year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        return match.group(0)
+    year_match = re.match(r"(\d{4})", match.group(1))
+    year_words = _year_to_words(year_match) if year_match else str(year)  # type: ignore[arg-type]
+    return f"{_MONTHS[month - 1]} {_int_to_words(day)}, {year_words}"
+
+
 def _postcode_to_words(match: re.Match[str]) -> str:
     outward, inward = match.group(1), match.group(2)
     chars = " ".join(list(outward + inward))
@@ -153,10 +181,13 @@ def normalize_text(text: str) -> str:
         .replace("–", ", ")
         .replace("…", ", ")
     )
+    # "St." — street vs saint (m2): "123 Main St." -> "Main Street";
+    # a leading "St. John" -> "Saint John". Do the street case first.
+    out = _STREET_ST_RE.sub(r"\1 Street", out)
+    out = _REMAINING_ST_RE.sub("Saint", out)
     # Abbreviations first (they contain periods that look like sentence ends).
     for abbr, full in _ABBREVIATIONS.items():
         out = re.sub(rf"\b{re.escape(abbr)}", full, out, flags=re.IGNORECASE)
-    out = _POSTCODE_RE.sub(_postcode_to_words, out)
     out = _MONEY_RE.sub(_money_to_words, out)
     out = _PERCENT_RE.sub(
         lambda m: _int_to_words(int(float(m.group(1)))) + " percent"
@@ -165,7 +196,13 @@ def normalize_text(text: str) -> str:
         out,
     )
     out = _TIME_RE.sub(_time_to_words, out)
+    # ISO dates before the year/integer passes (m2): "2026-01-05" must not
+    # become "twenty twenty six-one-five".
+    out = _ISO_DATE_RE.sub(_iso_date_to_words, out)
     out = _YEAR_RE.sub(_year_to_words, out)
     out = _INT_RE.sub(lambda m: _int_to_words(int(m.group(0))), out)
+    # Postcodes LAST (m3): their digits must stay digits ("S W 1 A 1 A A"),
+    # and the integer pass above would have spelled isolated digits.
+    out = _POSTCODE_RE.sub(_postcode_to_words, out)
     out = re.sub(r"\s+", " ", out).strip()
     return out

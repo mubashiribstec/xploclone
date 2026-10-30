@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import re
 
-_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'“\(])")
+# Split on . ! ? + space regardless of the next sentence's case (m4):
+# "hello world. this is lowercase." is two sentences, not one.
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Za-z\"'“\(])")
 _CLAUSE_RE = re.compile(r"(?<=[,;:])\s+")
 
 DEFAULT_MAX_CHUNK_CHARS = 400

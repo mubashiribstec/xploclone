@@ -12,6 +12,8 @@ import os
 os.environ["XPLOCLONE_API_KEY_HASH"] = hashlib.sha256(b"test-key").hexdigest()
 os.environ["XPLOCLONE_ALLOW_NO_AUTH"] = "0"
 os.environ["XPLOCLONE_REF_DIR"] = "/tmp/xploclone-test-ref"
+# TestClient talks to host "testserver" — it must be an allowed host (m17).
+os.environ["XPLOCLONE_ALLOWED_HOSTS"] = "testserver,localhost,127.0.0.1"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

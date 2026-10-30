@@ -11,6 +11,15 @@ def test_split_sentences() -> None:
     ]
 
 
+def test_split_lowercase_sentences() -> None:
+    # Lowercase sentence starts still split (m4).
+    assert split_sentences("hello world. this is lowercase. Another One.") == [
+        "hello world.",
+        "this is lowercase.",
+        "Another One.",
+    ]
+
+
 def test_split_blank() -> None:
     assert split_sentences("   ") == []
 

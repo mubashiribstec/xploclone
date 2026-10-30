@@ -35,7 +35,24 @@ def test_abbreviation() -> None:
 
 def test_postcode_spelled() -> None:
     out = normalize_text("The office is at SW1A 1AA.")
-    assert "S W" in out and "A A" in out
+    # Digits stay digits inside the spelled form (m3).
+    assert out == "The office is at S W 1 A 1 A A."
+
+
+def test_iso_date() -> None:
+    # ISO dates are spoken as dates (m2), not "twenty twenty six-one-five".
+    assert normalize_text("Meet on 2026-01-05.") == "Meet on January five, twenty twenty six."
+
+
+def test_street_st() -> None:
+    # "Main St." is a street (m2). The period after "St." is consumed
+    # by the expansion, as with the other abbreviations.
+    assert normalize_text("123 Main St.") == "one hundred twenty three Main Street"
+
+
+def test_saint_st() -> None:
+    # A leading "St." is a saint (m2).
+    assert normalize_text("St. John will attend.") == "Saint John will attend."
 
 
 def test_small_numbers() -> None:

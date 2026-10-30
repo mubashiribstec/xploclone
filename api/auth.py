@@ -24,7 +24,9 @@ def hash_key(plaintext: str) -> str:
     return hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
 
 
-def _bearer_token(request: Request) -> str | None:
+def bearer_token(request: Request) -> str | None:
+    """Extract the Bearer token (or None). Public: the rate limiter in
+    api/main.py reuses it so limiting is keyed on the token hash (m5)."""
     auth = request.headers.get("Authorization", "")
     if not auth.lower().startswith("bearer "):
         return None
@@ -44,7 +46,7 @@ def require_api_key(request: Request) -> None:
                 "message": "No API key is configured on this server.",
             },
         )
-    token = _bearer_token(request)
+    token = bearer_token(request)
     if token is None or not hmac.compare_digest(hash_key(token), SETTINGS.api_key_hash):
         raise HTTPException(
             status_code=401,

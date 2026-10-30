@@ -13,6 +13,9 @@ dependencies = [
     # Chatterbox Turbo 350M, MIT. HF repo ResembleAI/chatterbox-turbo,
     # revision 749d1c1a46eb10492095d68fbcf55691ccf137cd (checked 2026-10-30).
     "chatterbox-tts==0.1.7",
+    # Direct import in api/engine.py (M3): snapshot_download enforces the
+    # pinned revision. Already in the lock as a transitive dep (1.33.0).
+    "huggingface-hub==1.33.0",
     # PyTorch 2.14.1. DEVIATION FROM PLAN-v2 (recorded in docs/BUILD-LOG.md):
     # the plan pins CUDA 12.8 (cu128), but no torch 2.14.1 CUDA wheel
     # exists on the cu128 index (it tops out at 2.11.0+cu128) or cu129

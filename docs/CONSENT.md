@@ -22,8 +22,10 @@ recordings. This template records the scope the owner agreed to.
   may be cloned with this system.
 - **Storage:** Recordings and voice embeddings stored privately and
   encrypted. Never in a public repository, never in a public bucket.
-- **Retention / deletion:** Outputs deleted after 7 days unless I
-  explicitly keep them. My recordings and embeddings will be deleted
+- **Retention / deletion:** Outputs are streamed, not stored, by default —
+  there is no stored output to delete. If a store-output option is ever
+  added, stored outputs will be deleted after 7 days unless I explicitly
+  keep them. My recordings and embeddings will be deleted
   within 7 days of my written request.
 - **Disclosure:** Synthetic audio generated in my voice will be marked
   as AI-generated (watermark / metadata) and, on calls, the caller will
