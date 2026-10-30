@@ -12,7 +12,14 @@ dependencies = [
     "pydantic==2.14.2",
     # Chatterbox Turbo 350M, MIT. HF repo ResembleAI/chatterbox-turbo,
     # revision 749d1c1a46eb10492095d68fbcf55691ccf137cd (checked 2026-10-30).
-    "chatterbox-tts==0.1.7",
+    # CODE PIN (fixed 2026-10-31): PyPI chatterbox-tts 0.1.7 has NO Nano
+    # support (from_local hardcodes t3_turbo_v1.safetensors), so the
+    # code is pinned to git master commit
+    # 5de7a54aa4e5e2baadb0182dde554908b48b85c2, verified in the
+    # 2026-10-31 sample test (Nano loads via from_local(nano=True),
+    # Turbo path intact). Do NOT float this to "latest" or back to
+    # 0.1.7 without re-running the Nano + Turbo load tests.
+    "chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2",
     # Direct import in api/engine.py (M3): snapshot_download enforces the
     # pinned revision. Already in the lock as a transitive dep (1.33.0).
     "huggingface-hub==1.33.0",

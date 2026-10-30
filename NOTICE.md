@@ -10,7 +10,7 @@ consult each package's own licence file for its exact terms.
 
 ## Voice engine (the only model code this service loads)
 
-- **Chatterbox Turbo** (`chatterbox-tts` 0.1.7, Hugging Face
+- **Chatterbox Turbo** (`chatterbox-tts` git master 5de7a54, Hugging Face
   `ResembleAI/chatterbox-turbo`) — **MIT**, by Resemble AI. This is the
   English TTS engine for `mubashir-en-us` / `mubashir-en-gb`. Its PerTh
   watermark is preserved on every output; never strip it.

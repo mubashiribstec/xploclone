@@ -1,50 +1,38 @@
 """Engine layer — Chatterbox Turbo for English, nothing for Urdu (yet).
 
-Verified against chatterbox-tts 0.1.7 (wheel inspected 2026-10-30):
-- ``from chatterbox.tts_turbo import ChatterboxTurboTTS``
-- ``ChatterboxTurboTTS.from_pretrained(device)`` downloads
-  ``ResembleAI/chatterbox-turbo`` (MIT, English only);
-  ``from_local(ckpt_dir, device)`` loads a pinned local copy.
+Chatterbox code is pinned to git master commit
+``5de7a54aa4e5e2baadb0182dde554908b48b85c2`` (2026-10-31, verified in
+the sample-test venv): PyPI chatterbox-tts 0.1.7 has NO Nano support
+(``from_local`` hardcodes ``t3_turbo_v1.safetensors``; Nano ships
+``t3_nano_v1.safetensors``), so the 0.1.7 pin was dropped — see
+``pyproject.toml`` and ``docs/BUILD-LOG.md``. The master code supports
+both Turbo (``from_local(ckpt, device)``) and Nano
+(``from_local(ckpt, device, nano=True)``) and ``from_pretrained``.
+
 - ``generate(text, audio_prompt_path=...)`` returns a torch tensor of
   24 kHz audio (``S3GEN_SR = 24000``) and applies the PerTh implicit
   watermark inside ``generate()`` — the watermark is preserved by
   design; this code never strips it and never re-encodes lossily.
-  Prosody (2026-10-30): ``generate()`` accepts ``exaggeration`` /
-  ``cfg_weight`` but Turbo 0.1.7 IGNORES them (warning in the wheel;
-  ``emotion_adv`` is off in Turbo, ``cfg_weight`` hardcoded 0.0 in
-  ``inference_turbo``). The sampling knobs it DOES honour are
+  Prosody: ``generate()`` accepts ``exaggeration`` / ``cfg_weight``
+  but Turbo/Nano IGNORE them (warning in the code; ``emotion_adv``
+  is off in Turbo, ``cfg_weight`` hardcoded 0.0 in
+  ``inference_turbo``). The sampling knobs they DO honour are
   ``temperature`` / ``top_p`` / ``top_k`` / ``repetition_penalty`` —
   see ``api/prosody.py``. The full ChatterboxTTS (500M) honours
   exaggeration/CFG; it is a Phase 2 candidate, not in this build.
-- ``REPO_ID = "ResembleAI/chatterbox-turbo"`` in the 0.1.7 source.
+- ``REPO_ID = "ResembleAI/chatterbox-turbo"``.
 
-Nano (CPU test mode, verified 2026-10-30 from the HF model card
-ResembleAI/chatterbox-nano): the same class, ``from_pretrained(device,
-nano=True)``, 10 s reference clip, vendor claim 3x real-time on CPU
-with 8 threads — unmeasured here. ``from_local`` may not accept
-``nano=`` in 0.1.7, so the loader tries it and falls back.
-
-Revision pin (M3 fix): the pinned revision is ENFORCED, not just
-recorded. ``load_english`` downloads the weights with
-``snapshot_download(repo_id, revision=...)`` and loads them with
-``from_local``; if the downloaded snapshot's commit does not equal the
-pinned revision, startup/synthesis fails loudly. The revision is
-exposed as ``resolved_revision`` and in ``GET /health``.
-
-The import of ``chatterbox`` is LAZY (inside ``load()``) so the API can
-start, answer /health, and run its unit tests on a CPU-only machine with
-no GPU and no torch installed. GPU inference was NOT tested in this
-environment — see docs/BUILD-LOG.md.
-
-Watermark (m8): PerTh is applied inside Chatterbox ``generate()``
-according to the wheel inspection, but that has NOT been verified on a
-real GPU output. Until the §9.1 watermark-survival test passes on a
-GPU, results report ``watermark="perth-unverified"`` — the header
-asserts nothing unmeasured.
-
-Urdu: there is deliberately no engine class here. ``mubashir-ur`` resolves
-to ``EngineUnavailable`` until the gated spike (docs/URDU-SPIKE.md)
-passes and an engine is wired in. Never fall back to English.
+Dtype bug (fixed 2026-10-31, was a 503 on EVERY synthesis):
+``prepare_conditionals`` calls ``norm_loudness()``, which multiplies
+the float32 reference by a ``numpy.float64`` gain (pyloudnorm returns
+np.float64) → float64 audio → the s3tokenizer matmuls float32 mel
+filters against float64 magnitudes → ``RuntimeError: expected scalar
+type Double but found Float``. The fix is in this module:
+``fix_norm_loudness_dtype`` wraps the loaded model's
+``norm_loudness`` so its output is cast back to float32, preserving
+loudness normalisation (the earlier test workaround of
+``norm_loudness=False`` is NOT used in production). Regression test
+in ``tests/test_engine.py``.
 """
 
 from __future__ import annotations
@@ -64,10 +52,43 @@ from .prosody import (
     TURBO_EXAGGERATION_EFFECTIVE,
     ProsodySettings,
 )
+from .proxy_env import sanitise_no_proxy
 from .voices import ENGLISH_VOICE_IDS, URDU_VOICE_ID
 
 REPO_ID = "ResembleAI/chatterbox-turbo"
 REPO_ID_NANO = "ResembleAI/chatterbox-nano"
+# Chatterbox code pin (git master commit, verified 2026-10-31 in the
+# sample-test venv: Nano support present, Turbo path intact). Must
+# match pyproject.toml / Dockerfile.cpu.
+CHATTERBOX_CODE_COMMIT = "5de7a54aa4e5e2baadb0182dde554908b48b85c2"
+
+
+def fix_norm_loudness_dtype(model: Any) -> Any:
+    """Wrap ``model.norm_loudness`` so it always returns float32 audio.
+
+    Upstream bug: ``norm_loudness`` multiplies the float32 reference
+    by a numpy.float64 gain, returning float64; the s3tokenizer then
+    fails with ``RuntimeError: expected scalar type Double but found
+    Float`` on every synthesis (GPU and CPU alike). Casting the
+    result back to float32 preserves the loudness normalisation and
+    fixes the crash. Idempotent (a wrapped method is not wrapped
+    twice). Returns the model, for chaining.
+    """
+    orig = getattr(model, "norm_loudness", None)
+    if orig is None or getattr(orig, "_xploclone_f32_fixed", False):
+        return model
+
+    def _norm_loudness_f32(wav: Any, sr: int, target_lufs: float = -27) -> Any:
+        import numpy as np
+
+        out = orig(wav, sr, target_lufs)
+        if out is None:
+            return out
+        return np.asarray(out, dtype=np.float32)
+
+    _norm_loudness_f32._xploclone_f32_fixed = True  # type: ignore[attr-defined]
+    model.norm_loudness = _norm_loudness_f32  # type: ignore[attr-defined]
+    return model
 
 
 def _set_torch_threads() -> None:
@@ -194,10 +215,15 @@ class EngineRegistry:
     def _download_checkpoint(self) -> Path:
         """Download the pinned revision. Fails loudly on any mismatch.
 
-        Turbo: revision is always pinned (M3). Nano: an empty pin
-        downloads the repo default and the resolved commit is
-        recorded — the operator must pin it before Gate 1.
+        Turbo: revision is always pinned (M3). Nano: pinned to the
+        snapshot commit downloaded and tested 2026-10-31 (see
+        config.py); an empty pin downloads the repo default and the
+        resolved commit is recorded — the operator must pin it
+        before Gate 1.
         """
+        # httpx crashes on bare-IPv6 NO_PROXY entries — sanitise again
+        # here in case the environment changed after import.
+        sanitise_no_proxy()
         from huggingface_hub import snapshot_download  # lazy, GPU-only dep
 
         revision = self._pinned_revision or None
@@ -207,19 +233,27 @@ class EngineRegistry:
         from chatterbox.tts_turbo import ChatterboxTurboTTS  # lazy, GPU-only
 
         if not self._is_nano:
-            return ChatterboxTurboTTS.from_local(str(ckpt_dir), device=self.device)
-        # Nano shares the Turbo class (HF model card, verified
-        # 2026-10-30): from_pretrained(device, nano=True). from_local
-        # may not accept nano= in this version, so try it and fall
-        # back to the plain call — and record which path was used.
+            model = ChatterboxTurboTTS.from_local(str(ckpt_dir), device=self.device)
+            return fix_norm_loudness_dtype(model)
+        # Nano shares the Turbo class (git-master code, commit
+        # CHATTERBOX_CODE_COMMIT): from_local(ckpt, device, nano=True)
+        # loads t3_nano_v1.safetensors with the GPT2_small config.
+        # PyPI 0.1.7 has no nano kwarg — if this TypeError fires, the
+        # installed chatterbox is too old; the plain fallback below
+        # will then fail on the Nano weights, loudly, by design.
         try:
-            return ChatterboxTurboTTS.from_local(str(ckpt_dir), device=self.device, nano=True)  # type: ignore[call-arg]
+            model = ChatterboxTurboTTS.from_local(  # type: ignore[call-arg]
+                str(ckpt_dir), device=self.device, nano=True
+            )
         except TypeError:
-            logger.info(
-                "nano from_local has no nano kwarg, using plain from_local",
+            logger.error(
+                "nano from_local has no nano kwarg — installed chatterbox "
+                "predates Nano support; install git master "
+                f"{CHATTERBOX_CODE_COMMIT} (see pyproject.toml)",
                 extra={"fields": {"engine": "nano"}},
             )
-            return ChatterboxTurboTTS.from_local(str(ckpt_dir), device=self.device)
+            model = ChatterboxTurboTTS.from_local(str(ckpt_dir), device=self.device)
+        return fix_norm_loudness_dtype(model)
 
     def load_english(self) -> None:
         """Load the selected engine once, at the pinned revision. Safe to call repeatedly."""
@@ -313,6 +347,14 @@ class EngineRegistry:
         """
         assert self._turbo is not None  # guaranteed by _ensure_loaded
         ref = str(self.reference_path(voice_id))
+        # norm_loudness=True is EXPLICIT here (it is the default, but
+        # the default once hid a crash): the model's norm_loudness is
+        # wrapped by fix_norm_loudness_dtype at load time so its
+        # output is float32 — without the wrapper, every synthesis
+        # failed with "expected scalar type Double but found Float"
+        # (fixed 2026-10-31). Do not "simplify" this to
+        # norm_loudness=False: loudness normalisation is part of the
+        # voice conditioning, and the wrapper keeps it working.
         wav = self._turbo.generate(
             chunk,
             audio_prompt_path=ref,
@@ -322,6 +364,7 @@ class EngineRegistry:
             top_p=prosody.top_p,
             top_k=prosody.top_k,
             repetition_penalty=prosody.repetition_penalty,
+            norm_loudness=True,
         )
         arr = wav.squeeze(0).detach().cpu().numpy()
         # Clip before casting (m11): a raw (arr * 32767).astype(int16)

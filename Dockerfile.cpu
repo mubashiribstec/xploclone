@@ -34,7 +34,7 @@ RUN uv pip install --system --python 3.14.10 \
       "torch==2.14.1+cpu" "torchaudio==2.11.0+cpu" \
     && uv pip install --system --python 3.14.10 \
       "fastapi==0.162.0" "uvicorn[standard]==0.54.0" "pydantic==2.14.2" \
-      "chatterbox-tts==0.1.7" "huggingface-hub==1.33.0" \
+      "chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2" "huggingface-hub==1.33.0" \
       "soundfile==0.14.0" "numpy==2.5.4" "httpx==0.28.1"
 
 COPY api/ ./api/

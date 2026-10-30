@@ -411,3 +411,37 @@ unauthenticated 307 to /login, all pages 200 authenticated, logout
 clears the session, `/api/voices` + `/api/health` correctly 502 with
 no API running. End-to-end audio generation in the browser still
 needs GPU + recordings — not claimed.
+
+## API bugfix round — 503 on every synthesis + no Nano support (2026-10-31)
+
+Found by the sample test (`~/workspace/xploclone-sample-test/TEST-REPORT.md`):
+`POST /v1/tts` returned 503 `synthesis_failed` after 32.7 s on CPU/Nano,
+and the same bug would hit GPU/Turbo too.
+
+| Bug | Cause (verified from source) | Fix |
+|---|---|---|
+| B1 dtype crash | chatterbox `norm_loudness()` multiplies the float32 reference by a `numpy.float64` gain (pyloudnorm) → float64 audio → s3tokenizer matmuls float32 mel filters against float64 → `RuntimeError: expected scalar type Double but found Float` | `api/engine.py: fix_norm_loudness_dtype()` wraps the loaded model's `norm_loudness` to cast its output back to float32, preserving loudness normalisation. `_synthesise_one` now passes `norm_loudness=True` explicitly (the earlier test workaround `norm_loudness=False` is NOT used in production). Regression tests in `tests/test_engine.py` (float64-in → float32-out; generate called with `norm_loudness=True`). |
+| B2 no Nano support in the pin | PyPI `chatterbox-tts==0.1.7` has no Nano support: `from_local` hardcodes `t3_turbo_v1.safetensors`, Nano ships `t3_nano_v1.safetensors`; `_load_turbo(nano=True)` → TypeError → FileNotFoundError | Code pinned to git master commit `5de7a54aa4e5e2baadb0182dde554908b48b85c2` (verified in the sample-test venv: Nano loads via `from_local(nano=True)`, Turbo path intact). `pyproject.toml` now uses `chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@5de7a54…`, `uv.lock` re-resolved (147 packages; only change besides the chatterbox source is transitive `resemble-perth` 1.0.1 → 1.1.0 from git master — the same version already in the tested scratch venv). `Dockerfile.cpu` installs the same git pin. Nano weights pinned in `api/config.py` to snapshot `71ccd1d0081b430592cea481f4307e764e07bc64` (the commit downloaded and tested 2026-10-31). Do NOT float the pin or return to 0.1.7 without re-running the Nano + Turbo load tests. |
+| B3 NO_PROXY crash | This VM's `NO_PROXY` contains bare IPv6 entries (`fd8b:…::1`); httpx raises `InvalidURL` on them, breaking `snapshot_download` | New `api/proxy_env.py`: `sanitise_no_proxy()` drops bare-IPv6 entries only (bracketed `[::1]` kept). Called from `api/__init__.py` at import and in `_download_checkpoint` before the download. Tests in `tests/test_proxy_env.py`. |
+
+Verification (this VM, no GPU, 2 cores): `pytest -q`, `ruff`, `mypy`,
+`npm run build` (see below); API re-test end-to-end on CPU/Nano with
+the LibriSpeech sample AND with the owner's own 14.7 s voice note —
+`POST /v1/tts` returns 200 with real WAV (timings in the test report
+below). Turbo synthesis still NEVER run anywhere — no GPU here.
+
+Verification (this VM, 2026-10-31, after the fixes): `pytest -q`
+**105 passed, 1 skipped** (was 100; +5 new: dtype regression x2,
+NO_PROXY x3). `ruff check` + `ruff format --check` pass,
+`mypy api` clean (15 files), `npm run typecheck` + `npm run build`
+pass (12 routes). API re-test end-to-end on CPU/Nano (scratch venv,
+git-master chatterbox, cached Nano weights): `POST /v1/tts`
+**HTTP 200 both times** — en-gb (LibriSpeech ref) 64.9 s incl. model
+load, 5.12 s WAV, 245,804 bytes, 96.8% non-zero; en-us (owner's own
+14.7 s note) 27.4 s, 7.04 s WAV, 337,964 bytes, 99.7% non-zero;
+`/v1/voices` reports both voices `loaded` afterwards. Server log
+clean except the expected Nano "CFG/min_p/exaggeration not supported"
+warning (D5). Outputs:
+`~/workspace/xploclone-sample-test/phase-a-retest/api-en-gb-librispeech.wav`
+and `api-en-us-his-voice.wav` (test outputs only, NOT in the repo).
+Turbo synthesis still NEVER run anywhere — no GPU here.

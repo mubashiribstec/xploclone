@@ -31,12 +31,15 @@ class Settings:
     # docs/OPEN-SOURCE-CLONERS-2026.md). Default turbo; CPU mode
     # (install.sh --cpu / docker-compose.cpu.yml) sets nano.
     engine: str = os.environ.get("XPLOCLONE_ENGINE", "turbo").lower()
-    # Hugging Face revision pinned for the Nano weights. Empty = unpinned:
-    # the first download records its resolved commit in /health and the
-    # operator must pin it (XPLOCLONE_CHATTERBOX_NANO_REVISION) before
-    # Gate 1. Turbo's revision is pinned by default and must never be
-    # left empty.
-    chatterbox_nano_revision: str = os.environ.get("XPLOCLONE_CHATTERBOX_NANO_REVISION", "")
+    # Hugging Face revision pinned for the Nano weights. Pinned
+    # 2026-10-31 to the snapshot commit actually downloaded and
+    # tested on CPU/Nano (71ccd1d0081b430592cea481f4307e764e07bc64) —
+    # the Nano weights must match the git-master chatterbox code
+    # (see pyproject.toml). Turbo's revision is pinned by default
+    # and must never be left empty.
+    chatterbox_nano_revision: str = os.environ.get(
+        "XPLOCLONE_CHATTERBOX_NANO_REVISION", "71ccd1d0081b430592cea481f4307e764e07bc64"
+    )
     # Torch threads on CPU (0 = torch default, usually #cores). Set to 8
     # for Nano's vendor-claimed 3x real-time (8 threads).
     torch_threads: int = _int_env("XPLOCLONE_TORCH_THREADS", 0)

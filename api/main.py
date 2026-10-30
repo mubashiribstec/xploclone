@@ -98,7 +98,7 @@ class TTSRequest(BaseModel):
     # preset: default | natural | warm | firm. style is an alias for
     # preset (either may be sent, not two different values). Explicit
     # knobs override the preset. exaggeration / cfg_weight are
-    # accepted, validated and logged, but Turbo 0.1.7 IGNORES them —
+    # accepted, validated and logged, but Turbo IGNORES them —
     # the audible variation comes from temperature / top_p /
     # repetition_penalty. Response headers report that honestly.
     # Out-of-range knobs are Pydantic 422s; unknown preset is 400
@@ -388,7 +388,7 @@ def _prosody_headers(prosody: ProsodySettings) -> dict[str, str]:
     """Response headers that say what the preset actually did.
 
     Honest by construction: exaggeration / CFG are "false" on Turbo
-    0.1.7 (verified from the wheel — see api/prosody.py), so a client
+    (verified from the chatterbox source — see api/prosody.py), so a client
     can never mistake a preset for a knob the engine honoured.
     """
     return {

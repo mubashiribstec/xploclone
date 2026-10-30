@@ -1,6 +1,7 @@
 """Prosody controls — human-voice presets for ``POST /v1/tts``.
 
-Verified finding (chatterbox-tts 0.1.7 wheel, inspected 2026-10-30):
+Verified finding (chatterbox source, inspected 2026-10-30
+on the 0.1.7 wheel and confirmed on git master 5de7a54, 2026-10-31):
 ``ChatterboxTurboTTS.generate()`` ACCEPTS ``exaggeration`` and
 ``cfg_weight`` as arguments, but Turbo IGNORES them:
 
@@ -35,7 +36,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Turbo 0.1.7: verified from the wheel source (see module docstring).
+# Turbo: verified from the chatterbox source (see module docstring).
 # These are facts about the engine, not configuration.
 TURBO_EXAGGERATION_EFFECTIVE = False
 TURBO_CFG_EFFECTIVE = False
@@ -46,7 +47,7 @@ class ProsodySettings:
     """Resolved prosody for one synthesis request.
 
     ``exaggeration`` / ``cfg_weight`` are the requested values (passed
-    to ``generate()`` but ignored by Turbo 0.1.7 — see above).
+    to ``generate()`` but ignored by Turbo — see above).
     ``temperature`` / ``top_p`` / ``top_k`` / ``repetition_penalty``
     are the knobs that actually vary Turbo output.
     """

@@ -38,7 +38,7 @@ Urdu is a gated research spike — it is **not** shipped in v1.
   own recordings.
 - [ ] **Preset:** start from `natural` (exaggeration 0.7 / CFG 0.3).
   Change one knob at a time, re-listen to the SAME script.
-  (Turbo 0.1.7 ignores exaggeration/CFG — presets work through
+  (Turbo ignores exaggeration/CFG — presets work through
   sampling variation; see `docs/API.md`.)
 - [ ] **Blind listen:** owner + ≥ 2 native listeners, randomised
   order, same script across presets and vs ElevenLabs v4 Turbo.

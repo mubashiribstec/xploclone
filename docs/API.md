@@ -81,8 +81,8 @@ Request JSON:
 | `format` | string, default `wav` | `wav` \| `pcm16` (mp3 → 400 `unsupported_format`) |
 | `preset` | string, default `default` | `default` \| `natural` \| `warm` \| `firm` — human-voice style (see below) |
 | `style` | string, optional | Alias for `preset` (either may be sent, not two different values) |
-| `exaggeration` | number 0.0–1.0, optional | Overrides the preset. Accepted + logged, but **Turbo 0.1.7 ignores it** (see below) |
-| `cfg_weight` | number 0.0–1.0, optional | Overrides the preset. Accepted + logged, but **Turbo 0.1.7 ignores it** (see below) |
+| `exaggeration` | number 0.0–1.0, optional | Overrides the preset. Accepted + logged, but **Turbo ignores it** (see below) |
+| `cfg_weight` | number 0.0–1.0, optional | Overrides the preset. Accepted + logged, but **Turbo ignores it** (see below) |
 | `temperature` | number 0.1–1.5, optional | Overrides the preset (this one Turbo honours) |
 | `top_p` | number 0.05–1.0, optional | Overrides the preset (Turbo honours it) |
 | `repetition_penalty` | number 1.0–2.0, optional | Overrides the preset (Turbo honours it) |
@@ -100,7 +100,7 @@ supplies the rest.
 | `warm` | 0.6 | 0.4 | 0.85 | 0.95 | 1.2 |
 | `firm` | 0.4 | 0.6 | 0.75 | 0.90 | 1.3 |
 
-**Verified limitation (chatterbox-tts 0.1.7 wheel, 2026-10-30):**
+**Verified limitation (chatterbox source, 2026-10-30/31):**
 `ChatterboxTurboTTS.generate()` accepts `exaggeration` and
 `cfg_weight` but IGNORES them — it warns so itself, Turbo sets
 `emotion_adv = False` (the exaggeration tensor is dead), and
@@ -142,7 +142,7 @@ Response: `200` with `audio/wav` (24 kHz, 16-bit, mono) or
 (until the GPU watermark-survival test passes),
 `X-Cache: hit|miss`, `X-XploClone-Preset`, and the honest effective
 flags `X-Prosody-Exaggeration-Effective: false` /
-`X-Prosody-CFG-Effective: false` (Turbo 0.1.7), and for pcm16
+`X-Prosody-CFG-Effective: false` (Turbo), and for pcm16
 streaming `X-Streaming: per-sentence`.
 
 The audio cache key includes the prosody (preset + knobs): the same

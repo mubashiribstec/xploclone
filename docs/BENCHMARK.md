@@ -15,7 +15,7 @@ earlier "Urdu only on v3" claim (see AUDIT-v1 §A).
 
 | System | Model (exact) | Date tested |
 |---|---|---|
-| XploClone EN | Chatterbox Turbo 0.1.7, HF rev `749d1c1a…` | — |
+| XploClone EN | Chatterbox Turbo (git master 5de7a54), HF rev `749d1c1a…` | — |
 | ElevenLabs EN | v4 Turbo | — |
 | ElevenLabs EN (quality ref) | v4 | — |
 | ElevenLabs UR | v4 Turbo (if Urdu listed) AND v3 | — |
