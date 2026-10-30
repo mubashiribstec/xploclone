@@ -24,6 +24,28 @@ class Settings:
 
     api_key_hash: str = os.environ.get("XPLOCLONE_API_KEY_HASH", "")
     device: str = os.environ.get("XPLOCLONE_DEVICE", "cuda")
+    # Engine: "turbo" (350M, GPU prod) or "nano" (110M, CPU test mode).
+    # Nano is the same ChatterboxTurboTTS class with nano=True
+    # (ResembleAI/chatterbox-nano, MIT, 10 s reference clip, vendor claim
+    # 3x real-time on 8 CPU cores — unmeasured here, see
+    # docs/OPEN-SOURCE-CLONERS-2026.md). Default turbo; CPU mode
+    # (install.sh --cpu / docker-compose.cpu.yml) sets nano.
+    engine: str = os.environ.get("XPLOCLONE_ENGINE", "turbo").lower()
+    # Hugging Face revision pinned for the Nano weights. Empty = unpinned:
+    # the first download records its resolved commit in /health and the
+    # operator must pin it (XPLOCLONE_CHATTERBOX_NANO_REVISION) before
+    # Gate 1. Turbo's revision is pinned by default and must never be
+    # left empty.
+    chatterbox_nano_revision: str = os.environ.get("XPLOCLONE_CHATTERBOX_NANO_REVISION", "")
+    # Torch threads on CPU (0 = torch default, usually #cores). Set to 8
+    # for Nano's vendor-claimed 3x real-time (8 threads).
+    torch_threads: int = _int_env("XPLOCLONE_TORCH_THREADS", 0)
+    # Per-sentence HTTP streaming for pcm16 (1 = on). WAV stays whole-file
+    # (its header needs the total size up front); see api/main.py.
+    stream_per_sentence: bool = os.environ.get("XPLOCLONE_STREAM_PER_SENTENCE", "1") == "1"
+    # Identical-request audio cache (in-memory, per process). 0 disables.
+    cache_ttl_s: int = _int_env("XPLOCLONE_AUDIO_CACHE_TTL_S", 3600)
+    cache_max_entries: int = _int_env("XPLOCLONE_AUDIO_CACHE_MAX_ENTRIES", 32)
     ref_dir: str = os.environ.get("XPLOCLONE_REF_DIR", "api/reference")
     chatterbox_revision: str = os.environ.get(
         "XPLOCLONE_CHATTERBOX_REVISION",

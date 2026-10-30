@@ -35,7 +35,23 @@ def client(monkeypatch):  # type: ignore[no-untyped-def]
             raise EngineUnavailable(voice_id, "Urdu engine is not loaded.")
         return SynthesisResult(pcm16=sine_pcm16(0.1), chunks=len(chunks))
 
+    def fake_synthesize_one(voice_id: str, chunk: str) -> bytes:
+        # Per-sentence streaming path (pcm16): same fake tone per chunk.
+        if voice_id == "mubashir-ur":
+            from api.engine import EngineUnavailable
+
+            raise EngineUnavailable(voice_id, "Urdu engine is not loaded.")
+        return sine_pcm16(0.1)
+
+    def fake_ensure_loaded(voice_id: str) -> None:
+        if voice_id == "mubashir-ur":
+            from api.engine import EngineUnavailable
+
+            raise EngineUnavailable(voice_id, "Urdu engine is not loaded.")
+
     monkeypatch.setattr(REGISTRY, "synthesize", fake_synthesize)
+    monkeypatch.setattr(REGISTRY, "synthesize_one", fake_synthesize_one)
+    monkeypatch.setattr(REGISTRY, "ensure_loaded", fake_ensure_loaded)
     monkeypatch.setattr(REGISTRY, "has_reference", lambda voice_id: voice_id != "mubashir-ur")
     with TestClient(app) as test_client:
         yield test_client

@@ -171,3 +171,99 @@ Docker is **not installed** in this VM (`docker: command not found`).
 3. Single concurrent synthesis (by design, PLAN-v2 §6.4).
 4. No audio is stored by default; no retention job yet (Phase 5).
 5. Web UI history lives in the browser (localStorage, last 50).
+
+## Improvement round — one-click install, CPU mode, docs, optimisation (2026-10-30)
+
+Head before this round: `c4ca337b8fd35c3d7e4fbcdafd7a24f54c7312a6` (PR #1, not merged).
+
+### What was added
+
+- **One-click install:** `install.sh` (Linux/macOS; `--help/--cpu/--gpu/--check-only/--dry-run`),
+  `install.ps1` + `install.bat` (Windows, **untested** — no Windows host here).
+  Checks Docker + Compose, warns (does not fail) if no GPU, creates `.env` (mode 600)
+  with fresh random API key/hash, web password hash + session secret (password printed
+  once, never stored in plaintext), creates `api/reference/`, runs the right compose
+  profile, waits up to 180 s for `/health`. README quick start is now literally
+  `./install.sh` then open `http://localhost:3000/login`.
+- **CPU mode:** `docker-compose.cpu.yml` (override — no GPU reservation, `Dockerfile.cpu`
+  with torch 2.14.1+cpu / torchaudio 2.11.0+cpu, verified to exist for cp314 on the
+  CPU index) + `XPLOCLONE_ENGINE=turbo|nano` (default turbo; nano on CPU) +
+  `XPLOCLONE_TORCH_THREADS`. Nano = same `ChatterboxTurboTTS` class with `nano=True`
+  (HF `ResembleAI/chatterbox-nano`, MIT), verified from the model card 2026-10-30.
+  `scripts/cpu_smoke.py` (synthetic sine clip, chunking, cache, TestClient /health +
+  /v1/voices in CPU/Nano mode — no model, no real voice) and `scripts/doctor.py`
+  (preflight: OS/Python/CPU/RAM/disk/GPU/Docker/.env/clips, `--json`, `--gpu`).
+- **PC requirements:** `docs/PC-REQUIREMENTS.md` — Tier A CPU test (4–8 cores, 8–16 GB RAM),
+  Tier B dev GPU (Z640 + GTX 1660 Super 6 GB dev-only; RTX 3060 12 GB recommended),
+  Tier C production (≥12 GB VRAM dedicated, CUDA 13.0 driver), model/VRAM table, checklist.
+- **Docs:** `docs/INSTALL.md`, `docs/API.md` (only endpoints that exist), `docs/ARCHITECTURE.md`,
+  `docs/TROUBLESHOOTING.md`, `docs/USER-GUIDE.md`, `docs/OPEN-SOURCE-CLONERS-2026.md`
+  (14 models + Nano-size caveat; licences verified from primary sources; ONNX Q4 Chatterbox
+  **not found** — no official ONNX Q4 Nano release, MLX 4-bit is Apple Silicon only).
+  `.env.example` gained the engine/nano/cache/thread vars. CI gained install
+  `--check-only` / doctor / CPU-smoke steps and a CPU image build check
+  (local file only — still excluded from push, M5).
+- **Optimisations:** per-sentence pcm16 streaming (`synthesize_stream()` generator +
+  `X-Streaming: per-sentence`; first byte measured <0.65 s with a 0.4 s/chunk fake,
+  2 chunks — test `test_pcm16_streams_first_chunk_early`); identical-request audio
+  cache (`api/cache.py`, TTL 3600 s, max 32 entries, `X-Cache: hit|miss`,
+  `xploclone_audio_cache_hits/misses` in /metrics); torch-thread config on CPU;
+  reference-stat cache in `has_reference()`. **Reference-embedding caching was NOT
+  implemented** — the 0.1.7 API takes `audio_prompt_path` per `generate()` call and
+  exposes no embedding object to cache; claiming it would be false. WAV stays
+  whole-file (header needs total size).
+
+### Before / after (measured in this environment)
+
+| Item | Before | After |
+|---|---|---|
+| Install | manual `.env`, manual keys, `docker compose up --build` | `./install.sh` (dry-run/--help/--check-only verified on this CPU-only VM; real Docker run NOT tested — no Docker here) |
+| CPU mode | none — compose reserves an NVIDIA GPU | `docker-compose.cpu.yml` + Nano wiring; Docker build NOT tested (no Docker here); real Nano synthesis on CPU **unmeasured** |
+| Tests | 46 passed | **55 passed, 1 skipped** (new: cache, streaming, CPU config, Nano repo, unknown-engine; 1 gated CPU-smoke test) |
+| First byte (pcm16, fake 0.4 s/chunk) | after last sentence (~0.8 s) | <0.65 s (test asserts) |
+| GPU latency / TTFA / quality | unmeasured | still **unmeasured** — no GPU here; do not quote numbers |
+
+### Bugs found and fixed during this round (verify, don't trust the summary)
+
+1. **`api/engine.py` was syntactically broken** — an earlier edit had inserted the
+   Nano constants and `_set_torch_threads()` *inside* the module docstring, so the
+   file did not parse (`SyntaxError` at line 21, `torch's`). The header was rebuilt
+   (docstring closed, `REPO_ID_NANO` + `_set_torch_threads()` moved to module level).
+   Lesson: the new tests had never actually run before this round — the "expect 46+"
+   baseline was from the audit, not from the edited code. Fixed and re-verified:
+   `pytest -q` → 55 passed.
+2. **`uv sync` fails in this VM** — hatchling is missing from the isolated build env
+   (`ModuleNotFoundError: No module named 'hatchling.build_meta'`, reproducible).
+   Tests were run with the earlier session's venv `/tmp/xploclone-fix-venv`
+   (fastapi 0.162.0, pytest 8.3.4). A fresh broken `.venv` created by that attempt
+   was removed. This is a VM/tooling issue, not a repo issue — CI uses pip, not uv.
+3. `install.sh --dry-run` used to die on missing Docker before showing anything and
+   would have created `.env` before the dry-run exit — reordered: dry-run now exits
+   before any file change and shows the exact compose command (exit 0).
+4. `scripts/cpu_smoke.py` set `XPLOCLONE_ALLOWED_HOSTS` after `api.config` was already
+   imported (→ 400 Invalid host header) and assumed short sentences chunk separately
+   (they are joined by design) — both fixed; smoke now passes.
+5. One test failed on the frozen `Settings` dataclass (`FrozenInstanceError`) — fixed
+   by replacing the object with `dataclasses.replace` instead of mutating it.
+
+### Test results (this environment, 2026-10-30, after fixes)
+
+Local env: 2 CPU cores, 7.7 GB RAM, 151.9 GB disk free, Python 3.12.3 system,
+Node 24.22.1, no Docker, no GPU. Tests run with `/tmp/xploclone-fix-venv`
+(Python 3.14.10, fastapi 0.162.0, pytest 8.3.4).
+
+| Check | Result |
+|---|---|
+| `pytest -q` | ✅ **55 passed, 1 skipped** (gated CPU-smoke sine test) |
+| `ruff check api scripts tests` | ✅ pass |
+| `ruff format --check api scripts tests` | ✅ pass (4 files reformatted in this round) |
+| `mypy api` | ✅ pass, no issues in 13 source files |
+| `npm ci && npm run typecheck && npm run build` (web) | ✅ pass |
+| `./install.sh --help` | ✅ prints usage, exit 0 |
+| `./install.sh --check-only` | ✅ fails clearly (Docker missing), exit 1 — correct on this VM |
+| `./install.sh --dry-run --cpu/--gpu` | ✅ shows exact compose command, creates no files, exit 0 |
+| `python3 scripts/doctor.py` (+ `--json`) | ✅ reports CPU/RAM/disk/GPU/Docker/.env/clips, exit 1 (Docker missing) — correct |
+| `python3 scripts/cpu_smoke.py` | ✅ PASS (synthetic clip, chunking, cache, /health + /v1/voices in CPU/Nano mode) |
+| `docker build` (api / cpu / web) | ❌ **NOT RUN — no Docker in this VM.** CI must prove it. |
+| Real Nano synthesis on CPU | ❌ **NOT RUN — no model download attempted here.** Unmeasured. |
+| GPU inference / TTFA / quality | ❌ **NOT RUN — no GPU here.** Unmeasured. |

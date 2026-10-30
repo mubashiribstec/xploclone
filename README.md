@@ -40,7 +40,61 @@ Urdu is a gated research spike — it is **not** shipped in v1.
 | MP3 output | — | Not in v1. WAV / PCM16 only. Add behind a flag + test if needed. |
 | GPU inference | 1 | **Not tested in this environment (no GPU here).** Needs owner/GPU verification — see `docs/BUILD-LOG.md`. Latency figures in PLAN-v2 are targets, not measurements. |
 
-## Quick start (dev, CPU — API logic only, no voice)
+## Quick start — one click
+
+```bash
+./install.sh            # auto: GPU if nvidia-smi works, else CPU
+./install.sh --gpu      # GPU mode (Turbo, CUDA 13.0)
+./install.sh --cpu      # CPU mode (Nano, file generation only)
+./install.sh --check-only   # preflight only, changes nothing
+```
+
+Then open **http://localhost:3000/login**. The installer prints the
+web password **once** — save it. Full instructions:
+`docs/INSTALL.md`. Windows: `.\install.ps1` (untested on Windows —
+see `docs/INSTALL.md`). Preflight without installing:
+`python3 scripts/doctor.py`.
+
+Without reference recordings the English voices report `unavailable` and
+`/v1/tts` returns 503. That is correct behaviour, not a bug: no recording,
+no voice. Place clips in `api/reference/` (gitignored, never commit them):
+`mubashir-en-us.wav`, `mubashir-en-gb.wav` (48 kHz, 16-bit, mono WAV).
+Then `docker compose restart api`.
+
+## CPU test mode (no GPU)
+
+```bash
+./install.sh --cpu
+# or: docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
+python3 scripts/cpu_smoke.py   # API-logic smoke test, no model, no real voice
+```
+
+CPU mode uses **Chatterbox Nano** (110M, MIT, `XPLOCLONE_ENGINE=nano`,
+`XPLOCLONE_DEVICE=cpu`) — vendor claim 3× real-time on 8 CPU cores,
+**unmeasured here**; on a 2-core VM expect slower than real-time.
+File generation only, never live calls. Turbo on CPU is a fallback,
+not a mode. See `docs/PC-REQUIREMENTS.md` (Tier A) and
+`docs/OPEN-SOURCE-CLONERS-2026.md` (§2, incl. the honest ONNX Q4
+answer: no official ONNX Q4 Nano release was found).
+
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| `docs/INSTALL.md` | One-click, manual, CPU, GPU install; recordings; updates |
+| `docs/USER-GUIDE.md` | Web UI: login, Generate, Voices, API keys, Health |
+| `docs/API.md` | All endpoints, auth, limits, errors, curl examples |
+| `docs/ARCHITECTURE.md` | Components, request flow, data, deployment |
+| `docs/TROUBLESHOOTING.md` | Docker, GPU, voices, auth, 401/429/503, CI |
+| `docs/PC-REQUIREMENTS.md` | 3 tiers (CPU test / dev GPU / production) + checklist + `scripts/doctor.py` |
+| `docs/OPEN-SOURCE-CLONERS-2026.md` | 14 open cloners compared (licence, VRAM, CPU, sample, verdict) |
+| `docs/COST-SHEET.md` | Cloud GPU prices + break-even vs ElevenLabs |
+| `docs/BENCHMARK.md` | Blind-test template (not run yet) |
+| `docs/URDU-SPIKE.md` | Gated Urdu research spike (template, not started) |
+| `docs/CONSENT.md` | Voice consent template |
+| `docs/BUILD-LOG.md` | Build + fix log, pinned versions, deviations |
+
+## Dev (no Docker — API logic only, no voice)
 
 ```bash
 cp .env.example .env          # then generate real keys — see .env.example header
@@ -50,11 +104,6 @@ uv sync --python 3.14         # creates .venv, installs pinned deps
 uv run uvicorn api.main:app --reload --port 8000
 curl localhost:8000/health
 ```
-
-Without reference recordings the English voices report `unavailable` and
-`/v1/tts` returns 503. That is correct behaviour, not a bug: no recording,
-no voice. Place clips in `api/reference/` (gitignored, never commit them):
-`mubashir-en-us.wav`, `mubashir-en-gb.wav` (48 kHz, 16-bit, mono WAV).
 
 ## Web UI login
 
@@ -102,17 +151,23 @@ synthesis (FIFO queue max 10, 30 s timeout → 503 `engine_busy`).
 
 ```
 api/            FastAPI app (config, voices, auth, rate limit, normalise,
-                chunking, engine adapter, audio, metrics, logging)
+                chunking, engine adapter, audio, metrics, logging, cache)
 web/            Next.js 16.4.3 admin UI (Generate, Voices, API keys, Health;
                 login-gated, see web/lib/web-auth.ts)
 tests/          Unit tests (no GPU)
 scripts/
   benchmark/    Blind-test harness (manifest, randomisation, WER scoring)
   record/       Recording manifest template
+  doctor.py     Preflight: CPU/RAM/disk/GPU/Docker/.env/clips
+  cpu_smoke.py  CPU smoke test (synthetic clip, no model, no real voice)
 docs/
+  INSTALL.md  USER-GUIDE.md  API.md  ARCHITECTURE.md  TROUBLESHOOTING.md
+  PC-REQUIREMENTS.md  OPEN-SOURCE-CLONERS-2026.md
   COST-SHEET.md  BENCHMARK.md  URDU-SPIKE.md  CONSENT.md  BUILD-LOG.md
   recording-scripts/  en-us.md  en-gb.md  ur.md
-Dockerfile.api  Dockerfile.web  docker-compose.yml
+Dockerfile.api  Dockerfile.cpu  Dockerfile.web
+docker-compose.yml  docker-compose.cpu.yml
+install.sh  install.ps1  install.bat
 pyproject.toml  uv.lock
 LICENSE  NOTICE.md
 PLAN-v1.md  PLAN-v2.md  AUDIT-v1.md   (plan history — v2 is authoritative)

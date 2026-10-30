@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 
 from .audio import SAMPLE_RATE, pcm16_to_wav
 from .auth import bearer_token, hash_key, require_api_key
+from .cache import AudioCache
 from .chunking import chunk_text
 from .config import SETTINGS
 from .engine import REGISTRY, EngineUnavailable
@@ -75,6 +76,9 @@ ip_limiter = RateLimiter(per_min=120)
 synthesis_queue = SynthesisQueue(
     max_waiters=SETTINGS.queue_max, timeout_s=float(SETTINGS.request_timeout_s)
 )
+# Identical-request audio cache (in-memory, per process). Keyed by
+# (voice_id, normalised text, format); see api/cache.py.
+AUDIO_CACHE = AudioCache(ttl_s=SETTINGS.cache_ttl_s, max_entries=SETTINGS.cache_max_entries)
 
 
 class TTSRequest(BaseModel):
@@ -127,6 +131,8 @@ def health() -> dict[str, object]:
         },
         "voices": {v.voice_id: REGISTRY.status(v.voice_id) for v in VOICES},
         "device": SETTINGS.device,
+        "engine": SETTINGS.engine,
+        "engine_name": REGISTRY.engine_name,
         "chatterbox_revision": SETTINGS.chatterbox_revision,
         "chatterbox_revision_resolved": REGISTRY.resolved_revision,
     }
@@ -221,6 +227,29 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
             detail={"code": "empty_text", "message": "Text is empty after normalisation."},
         )
     chunks = chunk_text(text)
+    # Identical-request cache: the cache stores PCM16; WAV is wrapped
+    # from it on a hit. Cache key uses normalised text, so "Hello." and
+    # "hello." (same after normalisation) share one entry.
+    cache_key = AudioCache.key(payload.voice_id, text, payload.format)
+    cached_pcm = AUDIO_CACHE.get(cache_key)
+    METRICS.record_cache(cached_pcm is not None)
+    if cached_pcm is not None:
+        latency_ms = (time.monotonic() - started) * 1000.0
+        METRICS.record(payload.voice_id, "200", latency_ms, chars=len(payload.text))
+        logger.info(
+            "tts",
+            extra={
+                "fields": {
+                    "voice_id": payload.voice_id,
+                    "chars": len(payload.text),
+                    "chunks": len(chunks),
+                    "latency_ms": round(latency_ms, 1),
+                    "cache": "hit",
+                    "watermark": "perth-unverified",
+                }
+            },
+        )
+        return _audio_response(payload, cached_pcm, latency_ms, cache="hit")
     acquired = await synthesis_queue.acquire()
     if not acquired:
         latency = (time.monotonic() - started) * 1000.0
@@ -235,6 +264,21 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
             },
             headers={"Retry-After": "5"},
         )
+    # Per-sentence streaming (pcm16 only): validate the engine BEFORE
+    # headers are sent, then stream chunk-by-chunk. WAV stays whole-file
+    # because its header needs the total size up front.
+    if payload.format == "pcm16" and SETTINGS.stream_per_sentence:
+        try:
+            await asyncio.to_thread(REGISTRY.ensure_loaded, payload.voice_id)
+        except EngineUnavailable as exc:
+            synthesis_queue.release()
+            latency = (time.monotonic() - started) * 1000.0
+            METRICS.record(payload.voice_id, "503", latency, error_code=exc.code)
+            raise HTTPException(
+                status_code=503,
+                detail={"code": exc.code, "message": exc.reason},
+            ) from exc
+        return _streaming_pcm16_response(payload, chunks, started, cache_key)
     try:
         # Blocking GPU work off the event loop (M2).
         result = await asyncio.to_thread(REGISTRY.synthesize, payload.voice_id, chunks)
@@ -279,11 +323,17 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
             }
         },
     )
+    AUDIO_CACHE.put(cache_key, result.pcm16)
+    return _audio_response(payload, result.pcm16, latency_ms, cache="miss")
+
+
+def _audio_response(payload: TTSRequest, pcm16: bytes, latency_ms: float, cache: str):  # type: ignore[no-untyped-def]
+    """Whole-file response (WAV, or pcm16 when streaming is off)."""
     if payload.format == "pcm16":
-        body = result.pcm16
+        body = pcm16
         media_type = "audio/L16; rate=24000"
     else:
-        body = pcm16_to_wav(result.pcm16, SAMPLE_RATE)
+        body = pcm16_to_wav(pcm16, SAMPLE_RATE)
         media_type = "audio/wav"
 
     def _stream() -> Iterator[bytes]:
@@ -296,8 +346,70 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
             "X-XploClone-Voice": payload.voice_id,
             "X-XploClone-Chars": str(len(payload.text)),
             "X-XploClone-Latency-Ms": f"{latency_ms:.1f}",
-            "X-Watermark": result.watermark,
+            "X-Watermark": "perth-unverified",
+            "X-Cache": cache,
             "Content-Disposition": f'attachment; filename="xploclone-{payload.voice_id}.wav"',
+        },
+    )
+
+
+def _streaming_pcm16_response(
+    payload: TTSRequest, chunks: list[str], started: float, cache_key: str
+) -> StreamingResponse:
+    """Per-sentence streaming response for pcm16.
+
+    The queue slot is held until the stream finishes (released in the
+    generator's finally), so a second request still waits its turn.
+    The first chunk is sent after the first sentence is synthesised,
+    not after the last one — that is the D4 fix. Total latency is
+    recorded when the stream completes.
+    """
+    collected: list[bytes] = []
+
+    async def _generate() -> AsyncIterator[bytes]:
+        try:
+            for chunk in chunks:
+                try:
+                    pcm = await asyncio.to_thread(REGISTRY.synthesize_one, payload.voice_id, chunk)
+                except EngineUnavailable as exc:
+                    # Engine died mid-stream: log server-side; the client
+                    # sees a truncated stream, which is why callers
+                    # should treat a short body as a failure, not audio.
+                    logger.error(
+                        "streaming synthesis failed",
+                        extra={"fields": {"voice_id": payload.voice_id, "error": exc.reason}},
+                    )
+                    return
+                except Exception as exc:  # noqa: BLE001 — same m10 rule
+                    logger.error(
+                        "streaming synthesis failed",
+                        extra={
+                            "fields": {
+                                "voice_id": payload.voice_id,
+                                "error": f"{type(exc).__name__}: {exc}",
+                            }
+                        },
+                    )
+                    return
+                collected.append(pcm)
+                yield pcm
+        finally:
+            synthesis_queue.release()
+            if collected:
+                AUDIO_CACHE.put(cache_key, b"".join(collected))
+            latency_ms = (time.monotonic() - started) * 1000.0
+            METRICS.record(payload.voice_id, "200", latency_ms, chars=len(payload.text))
+
+    return StreamingResponse(
+        _generate(),
+        media_type="audio/L16; rate=24000",
+        headers={
+            "X-XploClone-Voice": payload.voice_id,
+            "X-XploClone-Chars": str(len(payload.text)),
+            "X-Watermark": "perth-unverified",
+            "X-Cache": "miss",
+            "X-Streaming": "per-sentence",
+            "Content-Disposition": f'attachment; filename="xploclone-{payload.voice_id}.pcm16"',
         },
     )
 

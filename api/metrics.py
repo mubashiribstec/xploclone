@@ -21,6 +21,15 @@ class Metrics:
         self.chars_total: Counter[str] = Counter()
         self.latency_ms: dict[str, list[float]] = defaultdict(list)
         self.started_at = time.time()
+        self.cache_hits = 0
+        self.cache_misses = 0
+
+    def record_cache(self, hit: bool) -> None:
+        with self._lock:
+            if hit:
+                self.cache_hits += 1
+            else:
+                self.cache_misses += 1
 
     def record(
         self,
@@ -81,6 +90,12 @@ class Metrics:
             for key, value in sorted(self.errors_total.items()):
                 voice, code = key.split(":", 1)
                 lines.append(f'xploclone_errors_total{{voice_id="{voice}",code="{code}"}} {value}')
+            lines.append("# HELP xploclone_audio_cache_hits Identical-request cache hits")
+            lines.append("# TYPE xploclone_audio_cache_hits counter")
+            lines.append(f"xploclone_audio_cache_hits {self.cache_hits}")
+            lines.append("# HELP xploclone_audio_cache_misses Identical-request cache misses")
+            lines.append("# TYPE xploclone_audio_cache_misses counter")
+            lines.append(f"xploclone_audio_cache_misses {self.cache_misses}")
             lines.append(f"# uptime_seconds {time.time() - self.started_at:.1f}")
         return "\n".join(lines) + "\n"
 
