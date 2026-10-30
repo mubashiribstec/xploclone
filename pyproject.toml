@@ -1,0 +1,71 @@
+[project]
+name = "xploclone-api"
+version = "0.1.0"
+description = "XploClone — single-owner voice-cloning TTS (Mubashir Ali's voice only). Phase 1: English MVP."
+requires-python = ">=3.14,<3.15"
+readme = "README.md"
+license = "MIT"
+
+dependencies = [
+    "fastapi==0.162.0",
+    "uvicorn[standard]==0.54.0",
+    "pydantic==2.14.2",
+    # Chatterbox Turbo 350M, MIT. HF repo ResembleAI/chatterbox-turbo,
+    # revision 749d1c1a46eb10492095d68fbcf55691ccf137cd (checked 2026-10-30).
+    "chatterbox-tts==0.1.7",
+    # PyTorch 2.14.1. DEVIATION FROM PLAN-v2 (recorded in docs/BUILD-LOG.md):
+    # the plan pins CUDA 12.8 (cu128), but no torch 2.14.1 CUDA wheel
+    # exists on the cu128 index (it tops out at 2.11.0+cu128) or cu129
+    # (tops out at 2.13.0+cu129). The 2.14.1 CUDA wheel is cu130
+    # (verified via pip index, 2026-10-30). So v1 uses cu130 / CUDA 13.0.
+    # torchaudio has no 2.14 build anywhere (latest is 2.11.x); the cu130
+    # index tops out at torchaudio 2.11.0+cu130, which satisfies
+    # chatterbox-tts's torchaudio>=2.9.0 (Python >= 3.14). The
+    # torch/torchaudio minor-version mismatch is a known risk to verify
+    # on the GPU host — chatterbox-tts's Turbo path does not import
+    # torchaudio (verified from the 0.1.7 wheel).
+    "torch==2.14.1+cu130",
+    "torchaudio==2.11.0+cu130",
+    "soundfile==0.14.0",
+    "numpy==2.5.4",
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "ruff==0.12.0",
+    "mypy==1.14.1",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
+torchaudio = [{ index = "pytorch-cu130" }]
+
+[tool.uv]
+required-version = ">=0.8"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = false
+ignore_missing_imports = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
