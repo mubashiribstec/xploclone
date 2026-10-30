@@ -17,9 +17,9 @@ def test_cache_second_identical_request_is_a_hit(client, monkeypatch) -> None:
 
     orig = REGISTRY.synthesize
 
-    def counting(voice_id: str, chunks: list[str]):  # type: ignore[no-untyped-def]
+    def counting(voice_id: str, chunks: list[str], prosody=None):  # type: ignore[no-untyped-def]
         calls["n"] += 1
-        return orig(voice_id, chunks)
+        return orig(voice_id, chunks, prosody)
 
     monkeypatch.setattr(REGISTRY, "synthesize", counting)
     body = {"voice_id": "mubashir-en-gb", "text": "Hello, cache test."}

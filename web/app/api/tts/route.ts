@@ -24,6 +24,17 @@ export async function POST(req: Request) {
   if (!body || typeof body.voice_id !== "string" || typeof body.text !== "string") {
     return NextResponse.json({ detail: "voice_id and text are required." }, { status: 400 });
   }
+  // Forward prosody fields when present (validated server-side by the
+  // API: unknown preset -> 400, out-of-range knob -> 422). Only known
+  // fields are forwarded — nothing else from the browser reaches the API.
+  const forward: Record<string, unknown> = {
+    voice_id: body.voice_id,
+    text: body.text,
+    format: "wav",
+  };
+  for (const key of ["preset", "style", "exaggeration", "cfg_weight", "temperature", "top_p", "repetition_penalty"]) {
+    if (body[key] !== undefined) forward[key] = body[key];
+  }
   let res: Response;
   try {
     res = await fetch(`${API_URL}/v1/tts`, {
@@ -32,7 +43,7 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${API_KEY}`,
       },
-      body: JSON.stringify({ voice_id: body.voice_id, text: body.text, format: "wav" }),
+      body: JSON.stringify(forward),
     });
   } catch {
     return NextResponse.json({ detail: "API unavailable." }, { status: 502 });
@@ -49,6 +60,7 @@ export async function POST(req: Request) {
       "X-XploClone-Voice": res.headers.get("X-XploClone-Voice") ?? "",
       "X-XploClone-Chars": res.headers.get("X-XploClone-Chars") ?? "",
       "X-XploClone-Latency-Ms": res.headers.get("X-XploClone-Latency-Ms") ?? "",
+      "X-XploClone-Preset": res.headers.get("X-XploClone-Preset") ?? "",
       "X-Watermark": res.headers.get("X-Watermark") ?? "",
     },
   });

@@ -136,7 +136,7 @@ def test_tts_lowercase_bearer_accepted(client) -> None:  # type: ignore[no-untyp
 def test_synthesis_failure_is_503_not_500(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """An unexpected synthesis error (m10) is a 503 synthesis_failed, not a bare 500."""
 
-    def boom(voice_id: str, chunks: list[str]):  # type: ignore[no-untyped-def]
+    def boom(voice_id: str, chunks: list[str], prosody=None):  # type: ignore[no-untyped-def]
         raise RuntimeError("torch OOM (simulated)")
 
     from api.engine import REGISTRY
@@ -163,7 +163,7 @@ def test_health_responsive_during_synthesis(monkeypatch) -> None:  # type: ignor
     from api.engine import REGISTRY, SynthesisResult
     from api.main import app
 
-    def slow_synthesize(voice_id: str, chunks: list[str]) -> SynthesisResult:
+    def slow_synthesize(voice_id: str, chunks: list[str], prosody=None) -> SynthesisResult:  # type: ignore[no-untyped-def]
         time.sleep(0.8)  # blocking work, as a real GPU generate would be
         return SynthesisResult(pcm16=sine_pcm16(0.1), chunks=len(chunks))
 

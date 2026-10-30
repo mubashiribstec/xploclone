@@ -18,11 +18,103 @@ What it does NOT do in v1 (explicit non-goals):
   to the gated Urdu work (docs/URDU-SPIKE.md). Urdu text reaching this
   module is passed through unchanged and will be rejected upstream by the
   voice router (``mubashir-ur`` has no engine in v1).
+
+Pause preservation (human-voice work, 2026-10-30): normalisation keeps
+the *meaning* (numbers, dates, postcodes) and *flattens* the *typography*
+(dashes, quotes) into ASCII forms the model's text encoder handles —
+but it must NOT flatten *pauses*: a comma, a full stop, an em-dash and
+a line break are different pauses in human speech, so they map to
+different ASCII forms (comma, full stop, hyphen) instead of all
+becoming commas. See ``humanize_text`` below for the sentence-break step.
+
+Tag policy (gap A4, skill: prosody/emotion tags): Chatterbox was
+trained with vocalisation tags such as ``[laugh]``. They are allowed
+in FILE GENERATION only (``POST /v1/tts``), and only from the
+whitelist below. The live-call path (Phase 3) strips ALL tags, and
+any tag not on the whitelist is stripped everywhere — user text must
+never pass ``[scream]`` or an invented tag through to the model.
 """
 
-from __future__ import annotations
-
 import re
+
+# Chatterbox trained tags, whitelisted for file generation only.
+WHITELISTED_TAGS = frozenset({"laugh", "sigh", "chuckle", "gasp", "cough"})
+
+_TAG_RE = re.compile(r"\[([A-Za-z][A-Za-z _\-]{0,30})\]")
+
+
+def apply_tag_policy(text: str, allow_tags: bool = True) -> str:
+    """Apply the vocalisation-tag policy to raw user text.
+
+    ``allow_tags=True`` (file generation, ``POST /v1/tts``): keep
+    whitelisted tags exactly as written, strip every other ``[tag]``.
+    ``allow_tags=False`` (live-call / default path, Phase 3): strip
+    ALL tags, whitelisted or not — a phone call must never laugh,
+    sigh or cough on a caller's behalf because the text said so.
+    Tag names are matched case-insensitively; kept tags are written
+    lower-case. Stray brackets without a closing ``]`` are left alone.
+    """
+    if allow_tags:
+
+        def _keep(match: re.Match[str]) -> str:
+            name = match.group(1).strip().lower()
+            return f"[{name}]" if name in WHITELISTED_TAGS else ""
+
+        out = _TAG_RE.sub(_keep, text)
+    else:
+        out = _TAG_RE.sub("", text)
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
+
+def humanize_text(text: str) -> str:
+    """Make normalised text read like a human speaking, not a list.
+
+    - Line breaks become sentence breaks: a line that does not end
+      with terminal punctuation gets a full stop, so the pause the
+      writer intended survives chunking (comma < full stop < line
+      break in pause length).
+    - Long sentences (> 180 chars) are split at the first comma past
+      60 chars into two short sentences — one idea per sentence.
+      Over-long chunks force flat, rushed delivery; short sentences
+      let the model breathe.
+    - No fake breath sounds, no background noise, no added words:
+      this step only inserts punctuation breaks. It never
+      over-articulates — the words stay exactly as written.
+    """
+    lines: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line[-1].isalnum() or line[-1] in ")\"'":
+            line += "."
+        lines.append(line)
+    joined = " ".join(lines)
+    sentences = re.split(r"(?<=[.!?])\s+", joined)
+    out: list[str] = []
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if sentence:
+            out.extend(_split_long_sentence(sentence))
+    return " ".join(out)
+
+
+def _split_long_sentence(sentence: str) -> list[str]:
+    """Split one over-long sentence at a comma into two sentences."""
+    if len(sentence) <= 180:
+        return [sentence]
+    comma = sentence.find(",", 60)
+    if comma == -1 or comma > len(sentence) - 40:
+        return [sentence]
+    first = sentence[:comma].rstrip()
+    rest = sentence[comma + 1 :].strip()
+    if not first or not rest:
+        return [sentence]
+    if not first.endswith((".", "!", "?")):
+        first += "."
+    rest = rest[0].upper() + rest[1:]
+    return [first, rest]
+
 
 _ONES = [
     "zero",
@@ -177,9 +269,9 @@ def normalize_text(text: str) -> str:
         .replace("”", '"')
         .replace("‘", "'")
         .replace("’", "'")
-        .replace("—", ", ")
-        .replace("–", ", ")
-        .replace("…", ", ")
+        .replace("—", " - ")  # em-dash: hyphen pause, NOT a comma
+        .replace("–", " - ")  # en-dash: same — distinct from a comma
+        .replace("…", ". ")  # ellipsis: full-stop pause, NOT a comma
     )
     # "St." — street vs saint (m2): "123 Main St." -> "Main Street";
     # a leading "St. John" -> "Saint John". Do the street case first.
@@ -190,9 +282,11 @@ def normalize_text(text: str) -> str:
         out = re.sub(rf"\b{re.escape(abbr)}", full, out, flags=re.IGNORECASE)
     out = _MONEY_RE.sub(_money_to_words, out)
     out = _PERCENT_RE.sub(
-        lambda m: _int_to_words(int(float(m.group(1)))) + " percent"
-        if float(m.group(1)).is_integer()
-        else m.group(1) + " percent",
+        lambda m: (
+            _int_to_words(int(float(m.group(1)))) + " percent"
+            if float(m.group(1)).is_integer()
+            else m.group(1) + " percent"
+        ),
         out,
     )
     out = _TIME_RE.sub(_time_to_words, out)

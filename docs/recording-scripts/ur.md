@@ -80,7 +80,27 @@ letters inside the Urdu script and must be pronounced in English.
 24. اگر آپ دلچسپی رکھتے ہیں تو میں آپ کا انٹرویو جمعرات کی صبح طے کر سکتا ہوں۔
     (Agar aap dilchaspi rakhtay hain to mein aap ka interview jumeraat ki subah tay kar sakta hoon.)
 
-## E. طویل پیراگراف (Long paragraphs)
+## E. قدرتی لہجہ / Conversational range (natural, not acted drama)
 
-25. السلام علیکم اور آج کے سیشن میں خوش آمدید۔ آج ہم انٹرویو کی تیاری کے بارے میں بات کریں گے، آپ کو کیا ساتھ لانا چاہیے، عام سوالات کے جوابات کیسے دینے ہیں، اور انٹرویو کے بعد کیا ہوتا ہے۔ اگر کسی بھی وقت آپ کے ذہن میں کوئی سوال آئے تو براہ کرم مجھے روک کر پوچھیں۔ آپ کے کیریئر کے بارے میں کوئی سوال چھوٹا نہیں ہوتا، اور میں چاہتا ہوں کہ آپ ابھی پوچھیں بجائے اس کے کہ رات کو پریشان رہیں۔
-26. ہماری ویب سائٹ روزمرہ کے کام کے لیے دو سو پچاس سے زیادہ مفت tools پیش کرتی ہے۔ آپ PDF فائلیں merge کر سکتے ہیں، تصاویر convert کر سکتے ہیں، بڑی فائلیں compress کر سکتے ہیں، اور اپنی عمر، تنخواہ اور قرض کی قسط کا حساب لگا سکتے ہیں، وہ بھی بغیر کوئی account بنائے۔ سب کچھ آپ کے براؤزر میں چلتا ہے، جس کا مطلب ہے کہ آپ کی فائلیں آپ کے کمپیوٹر سے باہر نہیں جاتیں، اور کچھ install کرنے کی ضرورت نہیں۔ یہ آج مفت ہے اور مفت ہی رہے گا۔
+**نوٹ:** ایک ہی لہجے میں صاف پڑھنے سے clone بھی ایک ہی لہجے میں بولے گا۔
+قدرتی انداز میں پڑھیں — جہاں آپ رکتے ہیں وہاں رکیں، سوال کو سوال کی طرح
+پڑھیں، زور اس لفظ پر دیں جو اہم ہے۔ زیادہ صاف بولنے کی کوشش نہ کریں۔
+
+27. Neutral: ٹھیک ہے، شروع کرتے ہیں۔ میں آپ کو مرحلہ وار بتاتا ہوں، اور آپ کسی بھی وقت مجھے روک سکتے ہیں۔
+    (Theek hai, shuru kartay hain. Mein aap ko marhala waar batata hoon, aur aap kisi bhi waqt mujhe rok saktay hain.)
+28. Warm: یہ بہت اچھی خبر ہے، واقعی۔ مجھے آپ کے لیے بہت خوشی ہوئی — آپ نے اس کے لیے بہت محنت کی ہے۔
+    (Yeh bohat achhi khabar hai, waqai. Mujhe aap ke liye bohat khushi hui — aap ne is ke liye bohat mehnat ki hai.)
+29. Firm: میں سمجھتا ہوں، لیکن آخری تاریخ جمعہ ہے، اور مجھے اس سے پہلے دستاویزات چاہییں۔
+    (Mein samajhta hoon, lekin aakhri tareekh jumma hai, aur mujhe is se pehlay dastawezaat chahiye.)
+30. Questioning: تو — آپ کو یہ کام کیسا لگا؟ کیا کوئی ایسی بات تھی جو ٹھیک نہ لگی ہو؟
+    (To — aap ko yeh kaam kaisa laga? Kya koi aisi baat thi jo theek na lagi ho?)
+
+**Long-form (2+ minutes, one take):** section F, items 31–32, read back
+to back in ONE continuous take without stopping — this is the
+long-form drift test (the clone must still sound like you at the end
+of two minutes, not just at the start).
+
+## F. طویل پیراگراف (Long paragraphs)
+
+31. السلام علیکم اور آج کے سیشن میں خوش آمدید۔ آج ہم انٹرویو کی تیاری کے بارے میں بات کریں گے، آپ کو کیا ساتھ لانا چاہیے، عام سوالات کے جوابات کیسے دینے ہیں، اور انٹرویو کے بعد کیا ہوتا ہے۔ اگر کسی بھی وقت آپ کے ذہن میں کوئی سوال آئے تو براہ کرم مجھے روک کر پوچھیں۔ آپ کے کیریئر کے بارے میں کوئی سوال چھوٹا نہیں ہوتا، اور میں چاہتا ہوں کہ آپ ابھی پوچھیں بجائے اس کے کہ رات کو پریشان رہیں۔
+32. ہماری ویب سائٹ روزمرہ کے کام کے لیے دو سو پچاس سے زیادہ مفت tools پیش کرتی ہے۔ آپ PDF فائلیں merge کر سکتے ہیں، تصاویر convert کر سکتے ہیں، بڑی فائلیں compress کر سکتے ہیں، اور اپنی عمر، تنخواہ اور قرض کی قسط کا حساب لگا سکتے ہیں، وہ بھی بغیر کوئی account بنائے۔ سب کچھ آپ کے براؤزر میں چلتا ہے، جس کا مطلب ہے کہ آپ کی فائلیں آپ کے کمپیوٹر سے باہر نہیں جاتیں، اور کچھ install کرنے کی ضرورت نہیں۔ یہ آج مفت ہے اور مفت ہی رہے گا۔

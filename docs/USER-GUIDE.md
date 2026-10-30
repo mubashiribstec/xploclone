@@ -29,6 +29,40 @@ it yet — place the clip in `api/reference/` and restart the API
 (see `docs/INSTALL.md`). Generation is rate-limited to 60 req/min
 per web session.
 
+## How to get a human voice (not AI-sounding)
+
+Robotic/flat delivery is a prosody failure, not a volume or
+clarity problem. Three things decide whether the output sounds
+human — in this order:
+
+1. **The reference recording.** A monotone clean read produces a
+   monotone clone. Record with natural range: neutral, warm, firm,
+   questioning — conversational, not acted drama. Vary pace and
+   emphasis; do not over-enunciate. See `docs/recording-scripts/`
+   section H. A 60-second proxy clip unblocks testing; the full
+   20-minute set is needed for Gate 1.
+2. **The preset.** Start with **Natural** (the recommended default).
+   Warm is softer/friendlier, Firm is steadier/more formal. Higher
+   exaggeration = more human variation, lower CFG = less anchored to
+   the reference. Change ONE knob at a time (advanced sliders) and
+   re-listen to the SAME script — never change two knobs at once.
+   Honest note: Chatterbox Turbo 0.1.7 ignores exaggeration/CFG, so
+   presets work through sampling variation (temperature/top-p) on
+   this engine. The UI says so next to the sliders.
+3. **The script.** Write short sentences, one idea per sentence.
+   Use commas for short pauses, full stops for longer ones, line
+   breaks for the longest. The API preserves those as different
+   pauses and splits over-long sentences automatically. `[laugh]`,
+   `[sigh]`, `[chuckle]`, `[gasp]`, `[cough]` are the only tags that
+   pass through — anything else is stripped.
+
+Then prove it with ears, not numbers: a blind listen (owner + ≥ 2
+native listeners, randomised order, same script across presets) and
+the long-form test (2+ minutes continuous, SIM at start vs end —
+see `docs/BENCHMARK.md` and `scripts/benchmark/similarity.py`).
+SIM ≥ 0.80 is a speaker check, not a quality check — a flat clone
+can score high SIM and still sound wrong.
+
 ## Voices page
 
 Lists the 3 voices with language, accent, engine and status

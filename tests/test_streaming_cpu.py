@@ -21,7 +21,7 @@ def test_pcm16_streams_first_chunk_early(client, monkeypatch) -> None:
     from api.audio import sine_pcm16
     from api.engine import REGISTRY
 
-    def slow_one(voice_id: str, chunk: str) -> bytes:
+    def slow_one(voice_id: str, chunk: str, prosody=None) -> bytes:  # type: ignore[no-untyped-def]
         time.sleep(0.4)
         return sine_pcm16(0.1)
 

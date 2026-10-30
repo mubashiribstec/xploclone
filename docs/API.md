@@ -79,13 +79,75 @@ Request JSON:
 | `voice_id` | string, required | `mubashir-en-us` \| `mubashir-en-gb` \| `mubashir-ur` |
 | `text` | string, required | 1–5,000 chars (after normalisation, empty → 400) |
 | `format` | string, default `wav` | `wav` \| `pcm16` (mp3 → 400 `unsupported_format`) |
+| `preset` | string, default `default` | `default` \| `natural` \| `warm` \| `firm` — human-voice style (see below) |
+| `style` | string, optional | Alias for `preset` (either may be sent, not two different values) |
+| `exaggeration` | number 0.0–1.0, optional | Overrides the preset. Accepted + logged, but **Turbo 0.1.7 ignores it** (see below) |
+| `cfg_weight` | number 0.0–1.0, optional | Overrides the preset. Accepted + logged, but **Turbo 0.1.7 ignores it** (see below) |
+| `temperature` | number 0.1–1.5, optional | Overrides the preset (this one Turbo honours) |
+| `top_p` | number 0.05–1.0, optional | Overrides the preset (Turbo honours it) |
+| `repetition_penalty` | number 1.0–2.0, optional | Overrides the preset (Turbo honours it) |
+
+Out-of-range knobs are Pydantic 422s; an unknown preset is 400
+`invalid_preset`. Explicit knobs override the preset; the preset
+supplies the rest.
+
+### Prosody presets — what they actually do (read this first)
+
+| Preset | exaggeration | CFG | temperature | top_p | rep. penalty |
+|---|---|---|---|---|---|
+| `default` | 0.5 | 0.5 | 0.8 | 0.95 | 1.2 |
+| `natural` *(recommended)* | 0.7 | 0.3 | 0.9 | 0.95 | 1.2 |
+| `warm` | 0.6 | 0.4 | 0.85 | 0.95 | 1.2 |
+| `firm` | 0.4 | 0.6 | 0.75 | 0.90 | 1.3 |
+
+**Verified limitation (chatterbox-tts 0.1.7 wheel, 2026-10-30):**
+`ChatterboxTurboTTS.generate()` accepts `exaggeration` and
+`cfg_weight` but IGNORES them — it warns so itself, Turbo sets
+`emotion_adv = False` (the exaggeration tensor is dead), and
+`inference_turbo` hardcodes `cfg_weight=0.0`. The full ChatterboxTTS
+(500M) honours both; it is a Phase 2 candidate, not in this build.
+So on Turbo the presets' audible effect comes from
+`temperature` / `top_p` / `repetition_penalty` (more sampling
+variation = less flat, metronomic delivery). The API still accepts
+and logs `exaggeration` / `cfg_weight` and passes them to
+`generate()` (future-proof if the engine changes), and every
+response says so honestly in its headers — never claim a preset
+changed exaggeration or CFG on Turbo.
+
+Tuning procedure: start from `natural`; listen to the SAME script;
+change ONE knob at a time (e.g. temperature 0.9 → 1.0 if still flat,
+0.9 → 0.85 if unstable); re-listen. Never change two knobs at once.
+
+### Tag policy (vocalisation tags)
+
+File generation (`POST /v1/tts`) only. Whitelisted tags are kept:
+`[laugh]`, `[sigh]`, `[chuckle]`, `[gasp]`, `[cough]`. Every other
+`[tag]` is stripped before synthesis — `[scream]` or an invented
+tag never reaches the model. The live-call path (Phase 3) strips
+ALL tags, whitelisted or not.
+
+### Text pipeline (order matters)
+
+1. Tag policy (raw text) → 2. normalisation (numbers, dates,
+postcodes) → 3. `humanize_text`: line breaks become sentence breaks,
+long sentences (> 180 chars) split at a comma into two short
+sentences — one idea per sentence. Punctuation pauses are preserved
+as different pauses (comma < full stop < em-dash < line break),
+never flattened to commas. No fake breath sounds, no added words.
 
 Response: `200` with `audio/wav` (24 kHz, 16-bit, mono) or
 `audio/L16; rate=24000` for pcm16. Headers:
 `X-XploClone-Voice`, `X-XploClone-Chars`, `X-XploClone-Latency-Ms`
 (whole-file responses only), `X-Watermark: perth-unverified`
 (until the GPU watermark-survival test passes),
-`X-Cache: hit|miss`, and for pcm16 streaming `X-Streaming: per-sentence`.
+`X-Cache: hit|miss`, `X-XploClone-Preset`, and the honest effective
+flags `X-Prosody-Exaggeration-Effective: false` /
+`X-Prosody-CFG-Effective: false` (Turbo 0.1.7), and for pcm16
+streaming `X-Streaming: per-sentence`.
+
+The audio cache key includes the prosody (preset + knobs): the same
+text in `natural` vs `firm` is different audio and never shares a
+cache entry.
 
 Per-sentence streaming (pcm16 only, on by default via
 `XPLOCLONE_STREAM_PER_SENTENCE=1`): the first chunk is sent after
@@ -106,6 +168,8 @@ synthesis entirely and returns `X-Cache: hit`.
 | 400 | `text_too_long` | text > 5,000 chars |
 | 400 | `empty_text` | text empty after normalisation |
 | 400 | `unsupported_format` | format is not wav/pcm16 |
+| 400 | `invalid_preset` | unknown preset, preset/style conflict, or out-of-range knob (bypassing Pydantic) |
+| 422 | — | out-of-range prosody knob (`exaggeration`/`cfg_weight` 0–1, `temperature` 0.1–1.5, `top_p` 0.05–1, `repetition_penalty` 1–2) |
 | 401 | — | missing / invalid API key |
 | 429 | `rate_limited` | 60 req/min per key (Retry-After header) |
 | 503 | `engine_unavailable` | Urdu (no engine yet), or English engine/reference missing |

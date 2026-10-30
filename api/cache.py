@@ -39,8 +39,14 @@ class AudioCache:
         self.misses = 0
 
     @staticmethod
-    def key(voice_id: str, text: str, fmt: str) -> str:
-        raw = f"{voice_id}\n{fmt}\n{text}".encode()
+    def key(voice_id: str, text: str, fmt: str, prosody: str = "") -> str:
+        # prosody is a stable fragment (ProsodySettings.cache_fragment).
+        # It MUST be part of the key: the same text in preset "natural"
+        # vs "firm" is different audio, and returning the cached
+        # "default" take for a "natural" request would be silent
+        # wrong-style audio. Empty string keeps the old 3-arg call
+        # shape working (tests, scripts) — it means "default prosody".
+        raw = f"{voice_id}\n{fmt}\n{prosody}\n{text}".encode()
         return hashlib.sha256(raw).hexdigest()
 
     @property

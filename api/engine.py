@@ -9,6 +9,13 @@ Verified against chatterbox-tts 0.1.7 (wheel inspected 2026-10-30):
   24 kHz audio (``S3GEN_SR = 24000``) and applies the PerTh implicit
   watermark inside ``generate()`` — the watermark is preserved by
   design; this code never strips it and never re-encodes lossily.
+  Prosody (2026-10-30): ``generate()`` accepts ``exaggeration`` /
+  ``cfg_weight`` but Turbo 0.1.7 IGNORES them (warning in the wheel;
+  ``emotion_adv`` is off in Turbo, ``cfg_weight`` hardcoded 0.0 in
+  ``inference_turbo``). The sampling knobs it DOES honour are
+  ``temperature`` / ``top_p`` / ``top_k`` / ``repetition_penalty`` —
+  see ``api/prosody.py``. The full ChatterboxTTS (500M) honours
+  exaggeration/CFG; it is a Phase 2 candidate, not in this build.
 - ``REPO_ID = "ResembleAI/chatterbox-turbo"`` in the 0.1.7 source.
 
 Nano (CPU test mode, verified 2026-10-30 from the HF model card
@@ -51,6 +58,12 @@ from typing import Any
 from .audio import SAMPLE_RATE, float_samples_to_pcm16
 from .config import SETTINGS
 from .logging_config import logger
+from .prosody import (
+    DEFAULT_PROSODY,
+    TURBO_CFG_EFFECTIVE,
+    TURBO_EXAGGERATION_EFFECTIVE,
+    ProsodySettings,
+)
 from .voices import ENGLISH_VOICE_IDS, URDU_VOICE_ID
 
 REPO_ID = "ResembleAI/chatterbox-turbo"
@@ -100,6 +113,14 @@ class SynthesisResult:
     # real GPU output (m8). Never claim "perth-preserved" unmeasured.
     watermark: str = "perth-unverified"
     chunks: int = 1
+    # Prosody that was requested for this synthesis. exaggeration /
+    # cfg_weight are recorded as NOT effective on Turbo 0.1.7 (see
+    # api/prosody.py) — the audible variation came from temperature /
+    # top_p / repetition_penalty. Never report a preset as changing
+    # exaggeration or CFG on this engine.
+    prosody: ProsodySettings = DEFAULT_PROSODY
+    exaggeration_effective: bool = TURBO_EXAGGERATION_EFFECTIVE
+    cfg_effective: bool = TURBO_CFG_EFFECTIVE
 
 
 @dataclass
@@ -276,24 +297,52 @@ class EngineRegistry:
                 "Chatterbox Turbo failed to load. Check the server logs.",
             )
 
-    def _synthesise_one(self, voice_id: str, chunk: str) -> bytes:
-        """Generate one chunk. Caller must have called _ensure_loaded."""
+    def _synthesise_one(
+        self, voice_id: str, chunk: str, prosody: ProsodySettings = DEFAULT_PROSODY
+    ) -> bytes:
+        """Generate one chunk. Caller must have called _ensure_loaded.
+
+        All sampling knobs are passed to ``generate()``: Turbo 0.1.7
+        honours temperature / top_p / top_k / repetition_penalty and
+        warns that it ignores exaggeration / cfg_weight (see
+        api/prosody.py). Passing them anyway keeps the call correct
+        if the engine is ever swapped for the full Chatterbox model,
+        which does honour them — and the result records that they
+        were NOT effective here, so nothing downstream can claim
+        otherwise.
+        """
         assert self._turbo is not None  # guaranteed by _ensure_loaded
         ref = str(self.reference_path(voice_id))
-        wav = self._turbo.generate(chunk, audio_prompt_path=ref)
+        wav = self._turbo.generate(
+            chunk,
+            audio_prompt_path=ref,
+            exaggeration=prosody.exaggeration,
+            cfg_weight=prosody.cfg_weight,
+            temperature=prosody.temperature,
+            top_p=prosody.top_p,
+            top_k=prosody.top_k,
+            repetition_penalty=prosody.repetition_penalty,
+        )
         arr = wav.squeeze(0).detach().cpu().numpy()
         # Clip before casting (m11): a raw (arr * 32767).astype(int16)
         # wraps on samples > ±1.0 and produces clicks.
         return float_samples_to_pcm16(arr.tolist())
 
-    def synthesize_one(self, voice_id: str, chunk: str) -> bytes:
+    def synthesize_one(
+        self, voice_id: str, chunk: str, prosody: ProsodySettings = DEFAULT_PROSODY
+    ) -> bytes:
         """Generate one chunk (public, for per-sentence HTTP streaming).
 
         Caller must have called ensure_loaded() first.
         """
-        return self._synthesise_one(voice_id, chunk)
+        return self._synthesise_one(voice_id, chunk, prosody)
 
-    def synthesize_stream(self, voice_id: str, chunks: list[str]) -> Generator[bytes]:
+    def synthesize_stream(
+        self,
+        voice_id: str,
+        chunks: list[str],
+        prosody: ProsodySettings = DEFAULT_PROSODY,
+    ) -> Generator[bytes]:
         """Yield PCM16 bytes per chunk, in order.
 
         A generator (not a list): the HTTP layer can send the first
@@ -304,13 +353,18 @@ class EngineRegistry:
         """
         self.ensure_loaded(voice_id)
         for chunk in chunks:
-            yield self._synthesise_one(voice_id, chunk)
+            yield self._synthesise_one(voice_id, chunk, prosody)
 
-    def synthesize(self, voice_id: str, chunks: list[str]) -> SynthesisResult:
+    def synthesize(
+        self,
+        voice_id: str,
+        chunks: list[str],
+        prosody: ProsodySettings = DEFAULT_PROSODY,
+    ) -> SynthesisResult:
         """Synthesise chunked text in one voice. Returns concatenated PCM16."""
         self.ensure_loaded(voice_id)
         started = time.monotonic()
-        pcm_parts = list(self.synthesize_stream(voice_id, chunks))
+        pcm_parts = list(self.synthesize_stream(voice_id, chunks, prosody))
         latency_ms = (time.monotonic() - started) * 1000.0
         return SynthesisResult(
             pcm16=b"".join(pcm_parts),
@@ -318,6 +372,9 @@ class EngineRegistry:
             latency_ms=latency_ms,
             watermark="perth-unverified",
             chunks=len(chunks),
+            prosody=prosody,
+            exaggeration_effective=TURBO_EXAGGERATION_EFFECTIVE,
+            cfg_effective=TURBO_CFG_EFFECTIVE,
         )
 
 

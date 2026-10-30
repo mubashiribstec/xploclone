@@ -27,7 +27,7 @@ AUTH = {"Authorization": "Bearer test-key"}
 
 @pytest.fixture()
 def client(monkeypatch):  # type: ignore[no-untyped-def]
-    def fake_synthesize(voice_id: str, chunks: list[str]) -> SynthesisResult:
+    def fake_synthesize(voice_id: str, chunks: list[str], prosody=None) -> SynthesisResult:  # type: ignore[no-untyped-def]
         # Urdu must still fail even with a fake engine — the router rejects it.
         from api.engine import EngineUnavailable
 
@@ -35,7 +35,7 @@ def client(monkeypatch):  # type: ignore[no-untyped-def]
             raise EngineUnavailable(voice_id, "Urdu engine is not loaded.")
         return SynthesisResult(pcm16=sine_pcm16(0.1), chunks=len(chunks))
 
-    def fake_synthesize_one(voice_id: str, chunk: str) -> bytes:
+    def fake_synthesize_one(voice_id: str, chunk: str, prosody=None) -> bytes:  # type: ignore[no-untyped-def]
         # Per-sentence streaming path (pcm16): same fake tone per chunk.
         if voice_id == "mubashir-ur":
             from api.engine import EngineUnavailable

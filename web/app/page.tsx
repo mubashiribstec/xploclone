@@ -14,6 +14,7 @@ type Voice = {
 type HistoryEntry = {
   text: string;
   voice_id: string;
+  preset: string;
   chars: number;
   latency_ms: string;
   at: string;
@@ -22,9 +23,35 @@ type HistoryEntry = {
 const HISTORY_KEY = "xploclone-history-v1";
 const MAX_HISTORY = 50;
 
+// Human-voice presets (api/prosody.py). Defaults: Natural is the
+// recommended starting point — it is the skill's flat-voice fix
+// (exaggeration 0.7, CFG 0.3). Turbo 0.1.7 ignores exaggeration/CFG,
+// so the audible variation comes from temperature/top_p — the UI
+// says so next to the sliders instead of implying otherwise.
+const PRESETS = [
+  { id: "natural", label: "Natural", hint: "most human variation" },
+  { id: "warm", label: "Warm", hint: "softer, friendlier" },
+  { id: "firm", label: "Firm", hint: "steadier, more formal" },
+  { id: "default", label: "Default", hint: "balanced" },
+] as const;
+type PresetId = (typeof PRESETS)[number]["id"];
+
+const PRESET_DEFAULTS: Record<PresetId, { exaggeration: number; cfgWeight: number }> = {
+  natural: { exaggeration: 0.7, cfgWeight: 0.3 },
+  warm: { exaggeration: 0.6, cfgWeight: 0.4 },
+  firm: { exaggeration: 0.4, cfgWeight: 0.6 },
+  default: { exaggeration: 0.5, cfgWeight: 0.5 },
+};
+
 export default function GeneratePage() {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [voiceId, setVoiceId] = useState("mubashir-en-gb");
+  const [preset, setPreset] = useState<PresetId>("natural");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  // Advanced sliders: explicit knobs override the preset. Defaults
+  // track the selected preset (see PRESET_DEFAULTS below).
+  const [exaggeration, setExaggeration] = useState(0.7);
+  const [cfgWeight, setCfgWeight] = useState(0.3);
   const [text, setText] = useState("Hello, thank you for speaking with me today.");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");
@@ -46,6 +73,12 @@ export default function GeneratePage() {
     }
   }, []);
 
+  function pickPreset(id: PresetId) {
+    setPreset(id);
+    setExaggeration(PRESET_DEFAULTS[id].exaggeration);
+    setCfgWeight(PRESET_DEFAULTS[id].cfgWeight);
+  }
+
   async function generate() {
     setError("");
     setStatus("");
@@ -54,7 +87,13 @@ export default function GeneratePage() {
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ voice_id: voiceId, text }),
+        body: JSON.stringify({
+          voice_id: voiceId,
+          text,
+          preset,
+          exaggeration,
+          cfg_weight: cfgWeight,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -72,10 +111,12 @@ export default function GeneratePage() {
         return url;
       });
       const latency = res.headers.get("X-XploClone-Latency-Ms") ?? "?";
-      setStatus(`Generated in ${latency} ms · ${text.length} chars · ${voiceId}`);
+      const returnedPreset = res.headers.get("X-XploClone-Preset") ?? preset;
+      setStatus(`Generated in ${latency} ms · ${text.length} chars · ${voiceId} · ${returnedPreset}`);
       const entry: HistoryEntry = {
         text: text.slice(0, 120),
         voice_id: voiceId,
+        preset: returnedPreset,
         chars: text.length,
         latency_ms: latency,
         at: new Date().toISOString(),
@@ -135,6 +176,78 @@ export default function GeneratePage() {
         </p>
       )}
 
+      <label className="mt-6 block text-sm font-medium">Style preset</label>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {PRESETS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => pickPreset(p.id)}
+            title={p.hint}
+            className={`rounded-full border px-4 py-2 text-sm ${
+              preset === p.id
+                ? "border-zinc-900 bg-zinc-900 text-white"
+                : "border-zinc-300 bg-white"
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1 text-xs text-zinc-500">
+        Natural is the recommended starting point. Higher exaggeration = more human
+        variation, lower CFG = less anchored to the reference. Note: Chatterbox
+        Turbo 0.1.7 ignores exaggeration/CFG, so presets vary the voice through
+        sampling (temperature/top-p) — change one knob at a time and re-listen
+        to the same script.
+      </p>
+
+      <button
+        onClick={() => setShowAdvanced((v) => !v)}
+        className="mt-3 text-sm font-medium underline"
+      >
+        {showAdvanced ? "Hide advanced prosody" : "Advanced prosody…"}
+      </button>
+      {showAdvanced && (
+        <div className="mt-3 space-y-4 rounded-lg border border-zinc-200 bg-white p-4">
+          <div>
+            <label className="block text-sm font-medium" htmlFor="exaggeration">
+              Exaggeration — {exaggeration.toFixed(2)} (default {PRESET_DEFAULTS[preset].exaggeration.toFixed(2)})
+            </label>
+            <input
+              id="exaggeration"
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={exaggeration}
+              onChange={(e) => setExaggeration(Number(e.target.value))}
+              className="mt-1 w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium" htmlFor="cfg">
+              CFG weight — {cfgWeight.toFixed(2)} (default {PRESET_DEFAULTS[preset].cfgWeight.toFixed(2)})
+            </label>
+            <input
+              id="cfg"
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={cfgWeight}
+              onChange={(e) => setCfgWeight(Number(e.target.value))}
+              className="mt-1 w-full"
+            />
+          </div>
+          <p className="text-xs text-zinc-500">
+            These two knobs are recorded with every generation but have no audible
+            effect on Turbo 0.1.7 (the engine ignores them). They take effect if
+            the engine is ever swapped for the full Chatterbox model. The preset
+            itself works today through sampling variation.
+          </p>
+        </div>
+      )}
+
       <label className="mt-6 block text-sm font-medium" htmlFor="text">
         Text (max 5,000 characters)
       </label>
@@ -173,7 +286,7 @@ export default function GeneratePage() {
         <ul className="mt-2 space-y-2">
           {history.map((h, i) => (
             <li key={i} className="rounded-lg border border-zinc-200 bg-white p-3 text-sm">
-              <div className="font-medium">{h.voice_id} · {h.chars} chars · {h.latency_ms} ms</div>
+              <div className="font-medium">{h.voice_id} · {h.preset ?? "default"} · {h.chars} chars · {h.latency_ms} ms</div>
               <div className="text-zinc-600">{h.text}</div>
               <div className="text-xs text-zinc-400">{new Date(h.at).toLocaleString()}</div>
             </li>

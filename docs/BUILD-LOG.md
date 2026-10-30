@@ -267,3 +267,122 @@ Node 24.22.1, no Docker, no GPU. Tests run with `/tmp/xploclone-fix-venv`
 | `docker build` (api / cpu / web) | ❌ **NOT RUN — no Docker in this VM.** CI must prove it. |
 | Real Nano synthesis on CPU | ❌ **NOT RUN — no model download attempted here.** Unmeasured. |
 | GPU inference / TTFA / quality | ❌ **NOT RUN — no GPU here.** Unmeasured. |
+
+## Human-voice round — prosody, tags, pauses, SIM/drift (2026-10-30, 21:53 PKT)
+
+Head before this round: `fb049dff5be02233ced5575cc35ea2a9c1915b6a` (PR #1, not merged).
+Request: "update the code with new skill — i need real human voice and its not look ai is speaking."
+Skill: `~/workspace/custom-skills/voice-cloning/` v1.0.0 (gaps A1 SIM, A2 drift, A3/A4 prosody/tag policy).
+
+### Finding D5 — Turbo 0.1.7 IGNORES exaggeration/CFG (material, verified from the wheel)
+
+`ChatterboxTurboTTS.generate()` accepts `exaggeration` / `cfg_weight`
+as arguments but ignores them: it warns "CFG, min_p and exaggeration
+are not supported by Turbo version and will be ignored";
+`Turbo.from_local` sets `hp.emotion_adv = False`, so the conditioning
+encoder has no `emotion_adv` projection (the value passed to
+`prepare_conditionals` is dead); `inference_turbo` hardcodes
+`cfg_weight=0.0` and never receives one. The full `ChatterboxTTS`
+(500M, `tts.py`) DOES honour both (emotion_adv on by default, CFG
+duplicates text tokens and passes cfg_weight to `t3.inference`).
+Consequence: the API still accepts/logs/passes exaggeration/CFG
+(future-proof), but presets get their audible effect from the
+sampling knobs Turbo DOES honour (temperature / top_p /
+repetition_penalty), and every response header says
+`X-Prosody-Exaggeration-Effective: false` /
+`X-Prosody-CFG-Effective: false`. Swapping in the full 500M model so
+exaggeration/CFG actually work is a Phase 2 candidate, not in this
+round. Do NOT claim a preset changed exaggeration or CFG on Turbo.
+
+### What was added
+
+- **Prosody controls (`api/prosody.py`, new):** `POST /v1/tts` fields
+  `preset` (`default|natural|warm|firm`), `style` (alias),
+  `exaggeration` / `cfg_weight` (0.0–1.0), `temperature` (0.1–1.5),
+  `top_p` (0.05–1.0), `repetition_penalty` (1.0–2.0). Presets:
+  natural 0.7/0.3 (temp 0.9), warm 0.6/0.4 (0.85), firm 0.4/0.6
+  (0.75, top_p 0.90, rep 1.3), default 0.5/0.5 (0.8). Explicit knobs
+  override the preset. Unknown preset → 400 `invalid_preset`;
+  out-of-range knob → 422. Values are logged (no text).
+- **Engine pass-through (`api/engine.py`):** `synthesize` /
+  `synthesize_one` / `synthesize_stream` take an optional
+  `ProsodySettings`; `_synthesise_one` passes all six knobs to
+  `turbo.generate()`. `SynthesisResult` records the requested
+  prosody + `exaggeration_effective=False` / `cfg_effective=False`.
+- **Tag policy (`api/normalize.py`):** `apply_tag_policy()` —
+  file generation keeps `[laugh] [sigh] [chuckle] [gasp] [cough]`
+  only; every other `[tag]` is stripped (tag-injection test added);
+  `allow_tags=False` strips ALL tags (Phase 3 live-call default).
+- **Natural pauses (`api/normalize.py`):** `humanize_text()` —
+  line breaks become sentence breaks, sentences > 180 chars split
+  at a comma (one idea per sentence), no fake breaths/noise.
+  Normalisation no longer flattens pauses: em/en-dash → ` - `,
+  ellipsis → `. ` (was `, ` for all three).
+- **Cache (`api/cache.py`, `api/main.py`):** cache key now includes
+  the prosody fragment — same text in `natural` vs `firm` never
+  shares an entry (test added: natural miss → natural hit → firm miss).
+- **SIM + drift (`scripts/benchmark/similarity.py`, new):**
+  cosine similarity with NAMED embedding ECAPA-TDNN (SpeechBrain
+  `spkrec-ecapa-voxceleb`, same model both sides; anything else is
+  an error), 16 kHz mono WAV only (wrong rate = error, never a
+  silent resample), `--long-form` drift test (first vs last 30 s
+  window of a 2+ min sample, |drift| > 0.05 flagged). Missing
+  SpeechBrain fails loudly with install instructions — never a
+  faked score. `docs/BENCHMARK.md`: SIM row now names ECAPA-TDNN,
+  drift row added, WER documented as floor-only (never rank by WER).
+- **Recording scripts:** en-us / en-gb gained §G conversational
+  range (neutral, warm, firm, questioning — not acted drama), §H
+  long-form 2+ minute one-take passage, and the monotone warning
+  (a monotone clean read produces a monotone clone). ur.md gained
+  §E conversational range + long-form note. Accent minimal sets
+  UNCHANGED.
+- **Web UI (`web/app/page.tsx`, `web/app/api/tts/route.ts`):**
+  preset picker (Natural/Warm/Firm/Default, Natural pre-selected),
+  advanced exaggeration/CFG sliders with per-preset defaults and
+  the honest note that Turbo ignores those two knobs; proxy
+  forwards prosody fields; history records the preset.
+- **Docs:** `docs/API.md` (fields, preset table, D5 limitation,
+  tag policy, pipeline order, new headers/errors),
+  `docs/USER-GUIDE.md` (how to get a human voice), README
+  human-voice checklist.
+
+### Test results (this environment, 2026-10-30)
+
+Local env: Python 3.12.3 system; tests run with a fresh venv
+`~/workspace/.venvs/xploclone-test` (fastapi 0.162.0, pytest, ruff,
+mypy, numpy — the earlier `/tmp/xploclone-fix-venv` was wiped with
+`/tmp` on VM replacement). Node 24.22.1. No GPU, no Docker.
+
+| Check | Result |
+|---|---|
+| `pytest -q` | ✅ **100 passed, 1 skipped** (was 55; +45 new: prosody, tags/humanize, similarity, API preset/cache) |
+| `ruff check api tests scripts` | ✅ pass |
+| `ruff format --check api tests scripts` | ✅ pass |
+| `mypy api` | ✅ pass, no issues in 14 source files |
+| `npm run typecheck && npm run build` (web) | ✅ pass |
+| GPU inference / latency / MOS / SIM on real audio | ❌ **NOT RUN — no GPU, no recordings here.** Unmeasured. |
+
+### Bugs found and fixed during this round (verify, don't trust the summary)
+
+1. `tests/test_cache.py`'s `counting` wrapper (and the conftest /
+   streaming fakes) took 2 args while `main.py` now passes prosody
+   positionally — the first run failed 503 via TypeError. All fakes
+   updated to accept `prosody=None`.
+2. Tag regex did not allow `-` in tag names, so `[evil-laugh]`
+   survived stripping — regex now allows `[A-Za-z _-]` and the
+   injection test covers it.
+3. `api/normalize.py` edit initially left a stray `"""` + a
+   `from __future__` import after function definitions (SyntaxError
+   risk) and a `\\s` in a raw regex — both fixed, file parses.
+4. Ruff `--fix` unquoted `"_FakeTensor"` annotations in
+   `tests/test_prosody.py` without postponed evaluation — added
+   `from __future__ import annotations` to that file.
+
+### Still unverified (do not claim otherwise)
+
+- Whether any preset actually sounds more human — needs his
+  recordings + a blind listener test (Gate 1). No MOS, no SIM on
+  real audio, no latency/quality numbers from this round.
+- Docker builds, GPU inference, watermark survival through μ-law,
+  ElevenLabs benchmark, Urdu spike, live-call streaming (Phase 3).
+- CI on GitHub: the workflow file is still not on the branch (M5).

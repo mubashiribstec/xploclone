@@ -7,7 +7,8 @@ Endpoints (PLAN-v2 §6.1):
 - POST /v1/tts      — Bearer API key required. Streams 24 kHz WAV.
 
 Error contract (never silent fallback):
-- 400 unknown voice_id / text empty / text > max chars / bad format.
+- 400 unknown voice_id / text empty / text > max chars / bad format /
+  unknown preset (invalid_preset). 422 out-of-range prosody knob.
 - 401 invalid or missing API key.
 - 429 rate limit exceeded (Retry-After header).
 - 503 engine_unavailable (Urdu, or English engine/reference missing),
@@ -44,7 +45,13 @@ from .config import SETTINGS
 from .engine import REGISTRY, EngineUnavailable
 from .logging_config import logger
 from .metrics import METRICS
-from .normalize import normalize_text
+from .normalize import apply_tag_policy, humanize_text, normalize_text
+from .prosody import (
+    TURBO_CFG_EFFECTIVE,
+    TURBO_EXAGGERATION_EFFECTIVE,
+    ProsodySettings,
+    resolve_prosody,
+)
 from .rate_limit import RateLimiter, SynthesisQueue
 from .voices import VOICES, get_voice
 
@@ -77,7 +84,7 @@ synthesis_queue = SynthesisQueue(
     max_waiters=SETTINGS.queue_max, timeout_s=float(SETTINGS.request_timeout_s)
 )
 # Identical-request audio cache (in-memory, per process). Keyed by
-# (voice_id, normalised text, format); see api/cache.py.
+# (voice_id, normalised text, format, prosody); see api/cache.py.
 AUDIO_CACHE = AudioCache(ttl_s=SETTINGS.cache_ttl_s, max_entries=SETTINGS.cache_max_entries)
 
 
@@ -87,6 +94,22 @@ class TTSRequest(BaseModel):
     # The limit is enforced in the endpoint from SETTINGS.max_chars (m6).
     text: str = Field(..., min_length=1)
     format: str = Field("wav", description="wav | pcm16 (mp3 is not supported in v1)")
+    # Prosody (human-voice work, 2026-10-30 — see api/prosody.py).
+    # preset: default | natural | warm | firm. style is an alias for
+    # preset (either may be sent, not two different values). Explicit
+    # knobs override the preset. exaggeration / cfg_weight are
+    # accepted, validated and logged, but Turbo 0.1.7 IGNORES them —
+    # the audible variation comes from temperature / top_p /
+    # repetition_penalty. Response headers report that honestly.
+    # Out-of-range knobs are Pydantic 422s; unknown preset is 400
+    # invalid_preset (resolved in the endpoint, not by Pydantic).
+    preset: str | None = Field(None, description="default | natural | warm | firm")
+    style: str | None = Field(None, description="Alias for preset (deprecated, use preset)")
+    exaggeration: float | None = Field(None, ge=0.0, le=1.0)
+    cfg_weight: float | None = Field(None, ge=0.0, le=1.0)
+    temperature: float | None = Field(None, ge=0.1, le=1.5)
+    top_p: float | None = Field(None, ge=0.05, le=1.0)
+    repetition_penalty: float | None = Field(None, ge=1.0, le=2.0)
 
 
 @app.middleware("http")
@@ -202,6 +225,25 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
                 "message": "format must be 'wav' or 'pcm16'. MP3 is not supported in v1.",
             },
         )
+    # Prosody resolution: unknown preset / conflicting preset+style /
+    # out-of-range knob (only reachable if Pydantic was bypassed) is a
+    # 400 invalid_preset — never a 500, never a silent default.
+    try:
+        prosody = resolve_prosody(
+            preset=payload.preset,
+            style=payload.style,
+            exaggeration=payload.exaggeration,
+            cfg_weight=payload.cfg_weight,
+            temperature=payload.temperature,
+            top_p=payload.top_p,
+            repetition_penalty=payload.repetition_penalty,
+        )
+    except ValueError as exc:
+        METRICS.record(payload.voice_id, "400", 0.0, error_code="invalid_preset")
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_preset", "message": str(exc)},
+        ) from exc
     require_api_key(request)
     # Rate-limit on the token hash (m5) — not on the full "Bearer …"
     # header, so "Bearer" vs "bearer" spellings share one bucket.
@@ -220,7 +262,12 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
             headers={"Retry-After": str(retry_after)},
         )
 
-    text = normalize_text(payload.text)
+    # Text pipeline (order matters): tag policy FIRST (raw text may
+    # contain [laugh] etc. — whitelist for file generation, strip the
+    # rest), then normalisation (numbers/dates/postcodes), then
+    # humanize (line breaks -> sentence breaks, long sentences split).
+    # humanize only inserts punctuation breaks; the words are unchanged.
+    text = humanize_text(normalize_text(apply_tag_policy(payload.text, allow_tags=True)))
     if not text:
         raise HTTPException(
             status_code=400,
@@ -229,8 +276,10 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
     chunks = chunk_text(text)
     # Identical-request cache: the cache stores PCM16; WAV is wrapped
     # from it on a hit. Cache key uses normalised text, so "Hello." and
-    # "hello." (same after normalisation) share one entry.
-    cache_key = AudioCache.key(payload.voice_id, text, payload.format)
+    # "hello." (same after normalisation) share one entry — AND the
+    # prosody fragment, so a "natural" request never gets a cached
+    # "default" take.
+    cache_key = AudioCache.key(payload.voice_id, text, payload.format, prosody.cache_fragment())
     cached_pcm = AUDIO_CACHE.get(cache_key)
     METRICS.record_cache(cached_pcm is not None)
     if cached_pcm is not None:
@@ -246,10 +295,14 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
                     "latency_ms": round(latency_ms, 1),
                     "cache": "hit",
                     "watermark": "perth-unverified",
+                    "preset": prosody.preset,
+                    "exaggeration": prosody.exaggeration,
+                    "cfg_weight": prosody.cfg_weight,
+                    "temperature": prosody.temperature,
                 }
             },
         )
-        return _audio_response(payload, cached_pcm, latency_ms, cache="hit")
+        return _audio_response(payload, cached_pcm, latency_ms, cache="hit", prosody=prosody)
     acquired = await synthesis_queue.acquire()
     if not acquired:
         latency = (time.monotonic() - started) * 1000.0
@@ -278,10 +331,10 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
                 status_code=503,
                 detail={"code": exc.code, "message": exc.reason},
             ) from exc
-        return _streaming_pcm16_response(payload, chunks, started, cache_key)
+        return _streaming_pcm16_response(payload, chunks, started, cache_key, prosody)
     try:
         # Blocking GPU work off the event loop (M2).
-        result = await asyncio.to_thread(REGISTRY.synthesize, payload.voice_id, chunks)
+        result = await asyncio.to_thread(REGISTRY.synthesize, payload.voice_id, chunks, prosody)
     except EngineUnavailable as exc:
         latency = (time.monotonic() - started) * 1000.0
         METRICS.record(payload.voice_id, "503", latency, error_code=exc.code)
@@ -320,14 +373,38 @@ async def text_to_speech(payload: TTSRequest, request: Request):  # type: ignore
                 "latency_ms": round(latency_ms, 1),
                 "engine_latency_ms": round(result.latency_ms, 1),
                 "watermark": result.watermark,
+                "preset": prosody.preset,
+                "exaggeration": prosody.exaggeration,
+                "cfg_weight": prosody.cfg_weight,
+                "temperature": prosody.temperature,
             }
         },
     )
     AUDIO_CACHE.put(cache_key, result.pcm16)
-    return _audio_response(payload, result.pcm16, latency_ms, cache="miss")
+    return _audio_response(payload, result.pcm16, latency_ms, cache="miss", prosody=prosody)
 
 
-def _audio_response(payload: TTSRequest, pcm16: bytes, latency_ms: float, cache: str):  # type: ignore[no-untyped-def]
+def _prosody_headers(prosody: ProsodySettings) -> dict[str, str]:
+    """Response headers that say what the preset actually did.
+
+    Honest by construction: exaggeration / CFG are "false" on Turbo
+    0.1.7 (verified from the wheel — see api/prosody.py), so a client
+    can never mistake a preset for a knob the engine honoured.
+    """
+    return {
+        "X-XploClone-Preset": prosody.preset,
+        "X-Prosody-Exaggeration-Effective": str(TURBO_EXAGGERATION_EFFECTIVE).lower(),
+        "X-Prosody-CFG-Effective": str(TURBO_CFG_EFFECTIVE).lower(),
+    }
+
+
+def _audio_response(
+    payload: TTSRequest,
+    pcm16: bytes,
+    latency_ms: float,
+    cache: str,
+    prosody: ProsodySettings,
+) -> StreamingResponse:
     """Whole-file response (WAV, or pcm16 when streaming is off)."""
     if payload.format == "pcm16":
         body = pcm16
@@ -348,13 +425,18 @@ def _audio_response(payload: TTSRequest, pcm16: bytes, latency_ms: float, cache:
             "X-XploClone-Latency-Ms": f"{latency_ms:.1f}",
             "X-Watermark": "perth-unverified",
             "X-Cache": cache,
+            **_prosody_headers(prosody),
             "Content-Disposition": f'attachment; filename="xploclone-{payload.voice_id}.wav"',
         },
     )
 
 
 def _streaming_pcm16_response(
-    payload: TTSRequest, chunks: list[str], started: float, cache_key: str
+    payload: TTSRequest,
+    chunks: list[str],
+    started: float,
+    cache_key: str,
+    prosody: ProsodySettings,
 ) -> StreamingResponse:
     """Per-sentence streaming response for pcm16.
 
@@ -370,7 +452,9 @@ def _streaming_pcm16_response(
         try:
             for chunk in chunks:
                 try:
-                    pcm = await asyncio.to_thread(REGISTRY.synthesize_one, payload.voice_id, chunk)
+                    pcm = await asyncio.to_thread(
+                        REGISTRY.synthesize_one, payload.voice_id, chunk, prosody
+                    )
                 except EngineUnavailable as exc:
                     # Engine died mid-stream: log server-side; the client
                     # sees a truncated stream, which is why callers
@@ -409,6 +493,7 @@ def _streaming_pcm16_response(
             "X-Watermark": "perth-unverified",
             "X-Cache": "miss",
             "X-Streaming": "per-sentence",
+            **_prosody_headers(prosody),
             "Content-Disposition": f'attachment; filename="xploclone-{payload.voice_id}.pcm16"',
         },
     )

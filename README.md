@@ -29,6 +29,25 @@ Urdu is a gated research spike — it is **not** shipped in v1.
   `.github/workflows/ci.yml` header. No CI has run on GitHub yet.
 - MIT `LICENSE` + third-party `NOTICE.md` at the repo root.
 
+## Human-voice checklist (does it sound like him, not like AI?)
+
+- [ ] **Reference quality:** recorded with natural range (neutral,
+  warm, firm, questioning — `docs/recording-scripts/` §G), not a
+  monotone clean read. 60-second proxy clip unblocks testing;
+  20-minute set needed for Gate 1. His clone trains only on his
+  own recordings.
+- [ ] **Preset:** start from `natural` (exaggeration 0.7 / CFG 0.3).
+  Change one knob at a time, re-listen to the SAME script.
+  (Turbo 0.1.7 ignores exaggeration/CFG — presets work through
+  sampling variation; see `docs/API.md`.)
+- [ ] **Blind listen:** owner + ≥ 2 native listeners, randomised
+  order, same script across presets and vs ElevenLabs v4 Turbo.
+- [ ] **Long-form test:** 2+ minute continuous sample, SIM at start
+  vs end (`scripts/benchmark/similarity.py --long-form`, |drift| ≤ 0.05).
+- [ ] **SIM (ECAPA-TDNN) ≥ 0.80** vs the clean original reference —
+  a speaker check, not a quality check. WER is a floor only and
+  must never rank models.
+
 ## What is NOT built yet (with gates)
 
 | Item | Phase | Gate / blocker |

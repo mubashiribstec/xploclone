@@ -59,12 +59,49 @@ better, about, laugh, grass, clerk, vase, leisure.
 | Naturalness MOS (UR, 1–5) | > best ElevenLabs UR | — | — | — |
 | Accent: US voice rated US | ≥ 3/4 listeners | — | — | — |
 | Accent: GB voice rated GB | ≥ 3/4 listeners | — | — | — |
-| Speaker similarity (cosine) | ≥ 0.80 | — | — | — |
+| Speaker similarity (cosine, **ECAPA-TDNN**) | ≥ 0.80 | — | — | — |
+| Long-form drift (SIM start vs end, 2+ min) | \|drift\| ≤ 0.05 | — | — | — |
 | WER EN (Whisper) | < 5% | — | — | — |
 | WER UR (Whisper) | < 10% | — | — | — |
 | Model TTFA p50 / p95 (prod GPU) | p95 < 200 ms | — | — | — |
 | File complete ≤ 500 chars | < 2 s | — | — | — |
 | Watermark survives 8 kHz μ-law | record pass/fail | — | — | — |
+
+### Speaker similarity — how to measure it (gap A1/A2)
+
+`scripts/benchmark/similarity.py` — no score is ever faked; if the
+embedding cannot be computed, there is no SIM number.
+
+```bash
+python scripts/benchmark/similarity.py --ref ref-clean.wav --gen gen.wav
+python scripts/benchmark/similarity.py --ref ref-clean.wav --gen long.wav --long-form
+```
+
+- **Embedding: ECAPA-TDNN** (SpeechBrain `spkrec-ecapa-voxceleb`),
+  same model both sides. Every SIM number must name its embedding;
+  a SIM without one is not comparable across runs.
+- **Reference: the clean original recording only** — never a
+  codec-reconstructed, μ-law, or re-encoded copy (that inflates SIM
+  and hides drift). Both files must be 16 kHz mono WAV.
+- **Target: SIM ≥ 0.80** (ECAPA-TDNN). SIM is a speaker check, not
+  a quality check — a flat clone can score high SIM and sound wrong.
+- **Long-form drift:** 2+ minute continuous sample, SIM of the
+  first 30 s window vs the last 30 s window against the same
+  reference. Report `drift = end − start`; |drift| > 0.05 is flagged
+  for investigation (vendor reports show SIM falling ~0.80 → ~0.52
+  over minutes on some systems).
+- **Prosody is recorded per run:** preset + exaggeration / CFG /
+  temperature / top_p / repetition_penalty, so a result can be
+  reproduced. Same script, same preset, blind listeners.
+
+### WER — a floor only, never a ranking (skill: evaluation)
+
+WER (Whisper transcription vs script) is an intelligibility floor:
+< 5% EN, < 10% UR. **WER must NEVER rank models.** A 2026 study
+(~11,800 human ratings) found WER negatively correlated with
+listener preference (Spearman ρ ≈ −0.11 to −0.45): flat,
+over-articulated speech scores best on WER and sounds worst.
+Naturalness is decided by blind MOS listeners, not by WER.
 
 ## Gates
 
