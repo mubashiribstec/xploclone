@@ -13,6 +13,21 @@ Mubashir's Urdu voice at acceptable quality, or not?"
 - Urdu script is the gate; Roman Urdu is a 500-word stretch (§4.3).
   Full Roman Urdu transliteration is Phase 2, not v1.
 
+> **Standing rule — diacritics (added 2026-10-31, Gap D4; does not
+> change the spike verdict or results above):** any future Urdu
+> recording or generation from a script must use fully vocalised
+> text — every Urdu script line carries full diacritics (zabar َ,
+> zer ِ, pesh ُ, shadd ّ, jazm ْ wherever they change the reading) +
+> a Roman/IPA gloss, with homographs disambiguated in context before
+> recording. Urdu Nastaliq normally omits most vowel diacritics, so
+> the same consonant skeleton can be read several ways; PronouncUR
+> G2P is only ~64% accurate on undiacritised text, so undiacritised
+> text is ambiguous text. **Never record or generate from
+> undiacritised Nastaliq alone.** A mispronunciation that comes from
+> an ambiguous line is a text problem, not a model problem — do not
+> blame the model for it. (Same rule now stands at the top of
+> `docs/recording-scripts/ur.md`.)
+
 ## 1. Kani-TTS Urdu
 
 | Field | Value |

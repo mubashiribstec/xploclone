@@ -445,3 +445,77 @@ warning (D5). Outputs:
 `~/workspace/xploclone-sample-test/phase-a-retest/api-en-gb-librispeech.wav`
 and `api-en-us-his-voice.wav` (test outputs only, NOT in the repo).
 Turbo synthesis still NEVER run anywhere — no GPU here.
+
+## Urdu spike push (2026-10-31) — head 8ccde290
+
+Pushed `docs/URDU-SPIKE.md` (status NOT STARTED → DONE 2026-10-31,
+verdict FAIL) + new `docs/URDU-SPIKE-RESULT.md`. DeepSpeak-v1
+(Apache-2.0, checkpoint SHA-256 verified) generates intelligible
+Urdu script but SIM 0.06–0.16 vs the owner (target 0.80) — speaker
+conditioning not taking effect; Roman Urdu unintelligible. Kani-TTS
+Urdu fixed voice, no cloning. Piper `ur_PK` intelligibility baseline
+only. Dia-1.6B-Urdu loads on CPU, generation untested — needs a GPU
+run. No voice files or audio samples in the commit. PR #1 still open,
+not merged. The v2 gap addendum (D1–D7) has no repo copy — it lives
+only in `~/workspace/xploclone/VOICE-CLONING-SKILL-GAPS.md`; no repo
+file was invented for it.
+
+## Skill-v2 improvements round — D1–D7 (2026-10-31)
+
+From the voice-cloning skill v2 gap addendum (D1–D7). No LoRA, no
+Urdu GPU work, no Xplogent integration, no merge.
+
+- **D1 acoustic diagnosis:** new `scripts/benchmark/acoustic_profile.py`
+  (numpy only by default, librosa/pyin optional, exits 2 naming
+  librosa if `--f0-method pyin` without it; unmeasurable = `null`,
+  never 0) + `tests/test_acoustic_profile.py` (19 tests). Reports
+  mean F0, F0 SD/range (st), jitter/shimmer, HNR, H1–H2, speaking
+  rate, pause/breath audit; compare mode gives clone−reference
+  deltas. Documented in `docs/BENCHMARK.md` (§ Acoustic profile).
+- **D5 too-clean check:** compare-mode flags — jitter/shimmer
+  < 0.5× reference, HNR > ref + 3 dB, F0 SD < 1.5 st or < 0.5× ref,
+  clone breath 0% while the reference has breaths. Row + subsection
+  added to `docs/BENCHMARK.md`.
+- **D2/D3 recording scripts:** `docs/recording-scripts/en-us.md`,
+  `en-gb.md`, `ur.md` gained a §0 sustained-vowel baseline
+  (/a, i, u/ 3–5 s, modal/breathy/creaky × 3 takes, per-take acoustic
+  log) and a systematic prosody block (statements, yes/no + wh
+  questions, lists, contrastive focus, long/short sentences, same
+  sentence at ~120/150/180 wpm, breath groups, emotion by scenario
+  with acoustic targets). Accent minimal sets verified unchanged.
+- **D4 Urdu diacritics:** every Urdu script line must carry full
+  diacritics + Roman/IPA gloss, homographs disambiguated before
+  recording (PronouncUR ~64% on undiacritised text). Added to
+  `ur.md` and as a standing rule in `docs/URDU-SPIKE.md` (verdict
+  unchanged). Caveat: the pre-existing §§A–F lines in `ur.md` are
+  NOT yet vocalised — deliberately left for the owner/recording
+  pass; a wrongly placed diacritic would mislead the recording.
+- **D6 telephony:** `docs/ARCHITECTURE.md` Phase 3 section states
+  G.711 keeps 300–3,400 Hz only and "identity must survive in
+  300 Hz–3.4 kHz — test SIM and listener identity *through* μ-law,
+  not just on 24 kHz WAV"; PerTh-through-μ-law explicitly
+  UNVERIFIED (`perth-unverified` kept).
+- **D7 citations:** `docs/BENCHMARK.md` corrected — TTSDS2 over
+  11,000 ratings (not ~11,800), ρ −0.11 to −0.45 is the expected
+  sign for an error metric; long-form drift Qwen3-TTS 0.780 → 0.560
+  over 0–210 s (Lim et al., Oct 2026), "~0.80 → ~0.52" labelled an
+  approximate model-specific illustration.
+- **500M blind-test prep:** new `docs/BENCHMARK-500M-BLIND-TEST.md`
+  — Turbo vs full 500M vs ElevenLabs v4 Turbo, same script/reference,
+  blind protocol, scoring sheet, Gate 1 criteria. Prep only: 500M
+  synthesis NOT run here (needs GPU; Turbo ignores exaggeration/CFG,
+  full 500M honours them — the reason for the test).
+
+Verification (this VM, 2026-10-31): `pytest -q` **124 passed,
+1 skipped** (was 105; +19 acoustic-profile tests). `ruff check` +
+`ruff format --check` pass, `mypy api` clean (15 files),
+`npm run typecheck` + `npm run build` pass (12 routes).
+Acoustic profile re-run by the coordinator on the Phase A samples
+(librosa pyin): api-en-us-his-voice.wav — mean F0 255.4 Hz, F0 SD
+1.97 st, jitter 1.07%, shimmer 36.7%, HNR 10.39 dB, H1–H2 3.81 dB,
+articulation 4.4 syll/s, 1 pause (3.27%, 0% breath). Compare mode
+(ref en-us vs API en-us) fires `f0_flat` (clone SD 1.97 vs ref
+4.62 st) — INVALID as a D5 result (different texts); it only
+exercises the code path. Shimmer 36.7% is far above clinical
+local-shimmer bands: treat it as a relative signal until the
+estimator is cross-checked against Parselmouth/Praat.

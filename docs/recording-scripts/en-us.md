@@ -14,6 +14,52 @@ Record the actual duration in the manifest; do not guess it.
 rhotic /r/ (car, park, better), "schedule" as SKED-jule,
 "tomato" as toh-MAY-toh, "herb" with the h, "leisure" as LEE-zher.
 
+## 0. Voice-quality baseline (sustained vowels — record FIRST, before §A)
+
+**Why first, and why it cannot be skipped:** without a baseline you
+cannot tell whether a clone sounds "breathy" because that is how you
+sound, or because the model added noise — and you cannot tell a tense
+clone from a modal one. A baseline recorded months later, in a
+different room or a different session, is not the same voice. Record
+it now, in this session, on this mic, at this gain. It takes about
+two minutes and is extra to the 20-minute connected-speech target.
+
+**What to record:** three vowels × three voice qualities × three
+takes each = 27 takes, one vowel per file.
+
+- Vowels — hold each 3–5 s, steady pitch, no vibrato, no sliding up
+  or down:
+  - /a/ — "ah", as in *father*
+  - /i/ — "ee", as in *see*
+  - /u/ — "oo", as in *food*
+- Qualities:
+  - **Modal** — your normal speaking voice.
+  - **Breathy** — deliberate breathy voice: audible air escaping,
+    soft, sigh-like. Do not whisper — whisper has no vocal-fold
+    vibration, so it is not a breathy vowel.
+  - **Creaky** — deliberate vocal fry: very low, irregular, crackly.
+    Short bursts are fine; do not force it if it hurts.
+- File names: `en-us_base_<vowel>_<style>_<take>.wav`, e.g.
+  `en-us_base_a_modal_1.wav`.
+
+**Per-take acoustic log** — measure every take with the same pipeline
+that will later compare clone vs reference (Praat/Parselmouth, or the
+benchmark acoustic-profile script when it exists). Record it in the
+manifest; leave a field blank if the tool cannot measure it — never
+guess a number.
+
+| Take | Vowel | Style | Duration (s) | Mean F0 (Hz) | F0 SD (Hz) | Intensity (dB) | Jitter (%) | Shimmer (%) | HNR (dB) | H1*–H2* (dB) | Session time |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| e.g. `en-us_base_a_modal_1` | /a/ | modal | | | | | | | | | |
+
+**Rules:** same mic, room and gain as the rest of the session; log
+session time per take (F0 drifts down and breathiness/creak rise as
+the voice tires); do **not** average breathy + modal takes — phonation
+is part of identity, mixing them blurs it; use the modal /a, i, u/
+means as the reference band for every later "too clean / too breathy"
+judgement — compare clone vs this baseline, same text, same pipeline,
+never against clinical sustained-vowel norms.
+
 ## A. Statements
 
 1. Hello, thank you for speaking with me today.
@@ -107,3 +153,62 @@ of two minutes, not just at the start.
 56. Good morning, and welcome to today's session. We are going to talk about how to prepare for your interview, what to bring, how to answer the most common questions, and what happens after the interview is over. If you have any questions at any point, please stop me and ask. There is no such thing as a silly question when it comes to your career, and I would much rather you ask now than worry about it later tonight.
 57. Our website offers more than two hundred and fifty free tools for everyday work. You can merge PDF files, convert images, compress large files, and calculate your age, your salary, and your loan payments, all without creating an account. Everything runs in your browser, which means your files never leave your computer, and there is nothing to install. It is free today, and it will stay free.
 58. The recruitment process has three steps. First, we have a short phone call to check your experience and your availability. Second, we invite you to an interview with the hiring manager, either in person or by video call. Third, if you are successful, we complete your checks and agree on a start date. The whole process usually takes about one week, and we will keep you updated at every stage.
+
+## J. Systematic prosody (one page — record in the same session, after §G)
+
+§G is natural conversational range; this block is controlled coverage
+of the prosody the clone must reproduce — same sentence, different
+structures, rates, breath groups and scenarios. About 3–4 minutes,
+extra to the 20-minute target. Log mean F0, F0 SD, duration and
+intensity per take in the manifest where the item asks for it.
+
+59. Statements — falling contour, final lengthening.
+    "The interview is on Thursday morning." / "Your application has
+    been approved."
+60. Yes/no questions — rising contour.
+    "Are you free on Thursday morning?" / "Did you receive the email
+    I sent yesterday?"
+61. Wh-questions — falling contour, not rising.
+    "What time does the interview start?" / "Where is the Manchester
+    office?"
+62. Lists — rise on each non-final item, fall on the last.
+    "We need your photo ID, your postcode, and your right to work
+    documents." / "You can merge PDFs, compress images, and calculate
+    your age — all for free."
+63. Contrastive focus — same sentence, three takes, stress a different
+    word each time; keep everything else the same.
+    Sentence: "The interview is on Thursday, not Friday."
+    Take 1: stress INTERVIEW. Take 2: stress THURSDAY. Take 3: stress
+    FRIDAY.
+64. Long vs short — same idea, two lengths.
+    Short: "The job is yours."
+    Long: "The job is yours, and the hiring manager would like you to
+    start on Monday morning, if that works for you."
+65. Same sentence at three rates — "Please bring a valid photo ID and
+    your right to work documents."
+    Take 1: ~120 wpm (deliberate, slow). Take 2: ~150 wpm (normal
+    conversation). Take 3: ~180 wpm (brisk, fast). Time each take and
+    log the actual wpm in the manifest; do not guess it.
+66. Breath-group variation — same sentence, two takes.
+    "If you are interested, I can book you in for Thursday morning."
+    Take 1: one breath group, no pause. Take 2: two breath groups —
+    pause at the comma, breathe, then continue.
+67. Emotion by scenario — play the situation, do not imitate an
+    emotion. 2–3 takes per scenario; keep the take whose measured
+    values match the target band (log mean F0, F0 SD, duration and
+    intensity per take). Targets are relative to YOUR neutral, not
+    absolute Hz values.
+    - Warm — you are reassuring a worried candidate: "That's great
+      news, honestly. I'm really pleased for you."
+      Targets: slower rate, lower intensity, longer pauses, mean F0
+      at or slightly below neutral, breathy/lax voice.
+    - Firm — you are holding a deadline with someone who is late:
+      "I understand, but the deadline is Friday, and I need the
+      documents before then."
+      Targets: raised, steady intensity; tense/pressed voice; short
+      pauses; mean F0 moderately raised; precise articulation.
+      Controlled firmness — not hot anger.
+    - Excited — you are telling a candidate they got the job: "You
+      got the job — congratulations, I'm delighted for you."
+      Targets: mean F0 much higher, widest F0 range/SD, faster rate,
+      higher intensity, few/short pauses.

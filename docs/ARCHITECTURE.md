@@ -99,3 +99,34 @@ if TTS is down.
 Urdu engine, live-call WebSocket `/v1/tts/stream` (8 kHz μ-law,
 barge-in), LoRA fine-tuning, backup/restore, persistent metrics,
 multi-user accounts. See PLAN-v2 §11.
+
+## Phase 3 — live-call design (not built yet)
+
+WebSocket session per conversation, per-sentence streaming from the
+Phase 1 HTTP path, μ-law 8 kHz output at the edge (synthesise at
+native 24 kHz, convert at the edge), barge-in handling, GPU-down
+fallback. Gate 3 runs on a real phone line, not on laptop speakers.
+
+**Telephony band (D6).** On a G.711 call, identity must survive in
+300 Hz–3.4 kHz — test SIM and listener identity *through* μ-law, not
+just on 24 kHz WAV.
+
+G.711 keeps 300–3,400 Hz only. Below 300 Hz (the F0 fundamental for
+deep male voices, chest resonance) and above 3,400 Hz (F3/F4, the /s/
+vs /f/ distinction) are removed by the channel, not by sampling.
+Upsampling cannot restore them; a model can only hallucinate
+plausible highs. A clone trained on full-band audio therefore loses
+its high-band identity cues on a call, while a telephone-band-trained
+clone has nothing to lose. The owner's voice is male, with F0 near
+the 300 Hz floor — the band edge is where his identity lives, so the
+μ-law test is a gate, not a formality. SIM and listener identity are
+measured on audio that has been through μ-law (and, at Gate 3,
+through a real phone line); a 24 kHz WAV score does not stand in
+for it.
+
+**Watermark through μ-law: UNVERIFIED.** PerTh watermark survival
+through μ-law is UNVERIFIED — do not claim it works. The build
+reports `perth-unverified` until the generate → transcode to 8 kHz
+μ-law → check PerTh detectable test passes on real GPU output
+(PLAN-v2 §9.1; gap B3). The μ-law transcode path itself does not
+exist yet (gap A5) — it is a Phase 3 prerequisite for this test.
