@@ -1,0 +1,47 @@
+# XploClone — CPU-only API image.
+# Python 3.14.10, PyTorch 2.14.1 CPU wheel (verified 2026-10-30:
+# torch-2.14.1+cpu-cp314 and torchaudio-2.11.0+cpu-cp314 exist on the
+# CPU index). Chatterbox Nano (110M, MIT) is the CPU engine — see
+# docs/OPEN-SOURCE-CLONERS-2026.md. CPU mode is file generation only,
+# never live calls; Nano's vendor claim is 3x real-time on 8 CPU
+# cores — unmeasured here, measure on your hardware.
+# Used by docker-compose.cpu.yml only. The GPU image is Dockerfile.api.
+# Docker build NOT tested in this environment (no Docker here).
+FROM python:3.14.10-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_NO_CACHE=1 \
+    HF_HOME=/app/.cache/huggingface
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates ffmpeg libsndfile1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r appuser -g 10001 && useradd -r -u 10001 -g appuser appuser \
+    && mkdir -p /app/.cache/huggingface /app/api/reference \
+    && chown -R appuser:appuser /app/.cache /app/api/reference
+
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
+
+WORKDIR /app
+# CPU torch: install the CPU wheels first, then the rest of the lock
+# without torch/torchaudio (they are already satisfied). The uv.lock
+# pins the CUDA wheels for the GPU image; the CPU image deliberately
+# does NOT use it for torch — see docs/PC-REQUIREMENTS.md.
+COPY pyproject.toml ./
+RUN uv pip install --system --python 3.14.10 \
+      --index https://download.pytorch.org/whl/cpu \
+      "torch==2.14.1+cpu" "torchaudio==2.11.0+cpu" \
+    && uv pip install --system --python 3.14.10 \
+      "fastapi==0.162.0" "uvicorn[standard]==0.54.0" "pydantic==2.14.2" \
+      "chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2" "huggingface-hub==1.33.0" \
+      "soundfile==0.14.0" "numpy==2.5.4" "httpx==0.28.1"
+
+COPY api/ ./api/
+
+USER appuser
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
