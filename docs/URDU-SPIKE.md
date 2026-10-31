@@ -1,6 +1,6 @@
 # XploClone — Urdu research spike (TEMPLATE, PLAN-v2 §4.1)
 
-Status: **NOT STARTED — PASS / FAIL not filled in.**
+Status: **DONE 2026-10-31 — verdict FAIL (see `~/workspace/xploclone/URDU-SPIKE-RESULT.md`).** DeepSpeak-v1 generates intelligible Urdu but does not clone the owner's voice (ECAPA SIM 0.06–0.16); Kani-UR/Piper are fixed voices; Dia-1.6B-Urdu loads but its cloning is untested (CPU impractical — needs a GPU run).
 Time-box: 1 week, parallel to the English MVP (Phase 1).
 Goal: answer with evidence, "can any licensed, downloadable model clone
 Mubashir's Urdu voice at acceptable quality, or not?"
