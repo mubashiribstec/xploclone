@@ -14,6 +14,8 @@ import asyncio
 import time
 from collections import defaultdict, deque
 
+from .config import SETTINGS
+
 
 class RateLimiter:
     """Sliding-window rate limiter, keyed by API-key hash."""
@@ -60,3 +62,17 @@ class SynthesisQueue:
 
     def release(self) -> None:
         self._sem.release()
+
+
+#: Shared singletons (telephony port, Phase 1). The HTTP endpoint
+#: (``api/main.py``) and the telephony WebSocket
+#: (``api/telephony_stream.py``) MUST share one synthesis queue — 1
+#: concurrent synthesis on a single GPU — and one per-key rate-limit
+#: bucket. Two queues would let an HTTP request and a WebSocket stream
+#: synthesise at the same time and break the invariant; two rate
+#: limiters would give one key 60 req/min on each surface.
+RATE_LIMITER = RateLimiter(per_min=SETTINGS.rate_limit_per_min)
+SYNTHESIS_QUEUE = SynthesisQueue(
+    max_waiters=SETTINGS.queue_max, timeout_s=float(SETTINGS.request_timeout_s)
+)
+

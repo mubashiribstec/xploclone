@@ -52,7 +52,8 @@ from .prosody import (
     ProsodySettings,
     resolve_prosody,
 )
-from .rate_limit import RateLimiter, SynthesisQueue
+from .rate_limit import RATE_LIMITER, SYNTHESIS_QUEUE, RateLimiter
+from .telephony_stream import router as telephony_stream_router
 from .voices import VOICES, get_voice
 
 
@@ -75,14 +76,17 @@ app = FastAPI(
 # Same-origin via the Next.js proxy only (m17). Direct browser calls are
 # not supported and no CORS middleware is enabled.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(SETTINGS.allowed_hosts))
+app.include_router(telephony_stream_router)  # telephony port Phase 1: WS /v1/tts/stream
 
-rate_limiter = RateLimiter(per_min=SETTINGS.rate_limit_per_min)
+# Rate limiter + synthesis queue are shared singletons (api/rate_limit.py)
+# so the HTTP endpoint and the telephony WebSocket (api/telephony_stream.py)
+# count against the same 60 req/min per key and the same 1-at-a-time
+# synthesis slot. Two instances would silently double both limits.
+rate_limiter = RATE_LIMITER
 # Coarse per-IP limiter, applied BEFORE auth (m5): unauthenticated
 # requests must not be able to flood the 401 path for free.
 ip_limiter = RateLimiter(per_min=120)
-synthesis_queue = SynthesisQueue(
-    max_waiters=SETTINGS.queue_max, timeout_s=float(SETTINGS.request_timeout_s)
-)
+synthesis_queue = SYNTHESIS_QUEUE
 # Identical-request audio cache (in-memory, per process). Keyed by
 # (voice_id, normalised text, format, prosody); see api/cache.py.
 AUDIO_CACHE = AudioCache(ttl_s=SETTINGS.cache_ttl_s, max_entries=SETTINGS.cache_max_entries)
@@ -502,3 +506,4 @@ def _streaming_pcm16_response(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):  # type: ignore[no-untyped-def]
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
