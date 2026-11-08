@@ -710,31 +710,31 @@ def too_clean_flags(ref: dict[str, object], clone: dict[str, object]) -> dict[st
     )
 
     jitter_flag = bool(
-        isinstance(r_jit, (int, float))
-        and isinstance(c_jit, (int, float))
+        isinstance(r_jit, int | float)
+        and isinstance(c_jit, int | float)
         and r_jit > 0
         and c_jit < TOO_CLEAN_JITTER_RATIO * r_jit
     )
     shimmer_flag = bool(
-        isinstance(r_shim, (int, float))
-        and isinstance(c_shim, (int, float))
+        isinstance(r_shim, int | float)
+        and isinstance(c_shim, int | float)
         and r_shim > 0
         and c_shim < TOO_CLEAN_SHIMMER_RATIO * r_shim
     )
     hnr_flag = bool(
-        isinstance(r_hnr, (int, float))
-        and isinstance(c_hnr, (int, float))
+        isinstance(r_hnr, int | float)
+        and isinstance(c_hnr, int | float)
         and c_hnr > r_hnr + TOO_CLEAN_HNR_DELTA_DB
     )
     f0_flat_flag = bool(
-        isinstance(c_f0sd, (int, float))
+        isinstance(c_f0sd, int | float)
         and (
             c_f0sd < HUMAN_BANDS["f0_sd_flat_below_st"]
-            or (isinstance(r_f0sd, (int, float)) and r_f0sd > 0 and c_f0sd < 0.5 * r_f0sd)
+            or (isinstance(r_f0sd, int | float) and r_f0sd > 0 and c_f0sd < 0.5 * r_f0sd)
         )
     )
     breath_flag = bool(
-        isinstance(r_breath, (int, float)) and r_breath > 0 and (c_breath is None or c_breath == 0)
+        isinstance(r_breath, int | float) and r_breath > 0 and (c_breath is None or c_breath == 0)
     )
     return {
         "jitter_too_clean": jitter_flag,
