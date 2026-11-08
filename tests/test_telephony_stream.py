@@ -264,3 +264,40 @@ def test_stream_client_hangup_is_not_a_synthesis_failure(client, monkeypatch):
     assert asyncio.run(scenario()) is False
     assert METRICS.errors_total["mubashir-en-us:synthesis_failed"] == failed_before
     assert METRICS.errors_total["mubashir-en-us:client_disconnected"] == hangups_before + 1
+
+
+def test_ws_accepts_bearer_header(client):
+    headers = {"Authorization": "Bearer test-key"}
+    with client.websocket_connect("/v1/tts/stream", headers=headers) as ws:
+        ws.send_json({"voice_id": "nope", "text": "x"})
+        assert ws.receive_json()["code"] == "unknown_voice"  # i.e. authorised
+
+
+def test_ws_bad_bearer_header_rejected(client):
+    headers = {"Authorization": "Bearer wrong"}
+    with client.websocket_connect("/v1/tts/stream?key=test-key", headers=headers) as ws:
+        assert ws.receive_json()["code"] == "unauthorized"  # header wins over query
+
+
+def test_uvicorn_websocket_log_line_is_redacted():
+    """uvicorn logs WebSocket paths with the query string; the ?key= value
+    must never reach the log (verified live against uvicorn 0.54.0)."""
+    import logging
+
+    from api.logging_config import install_secret_redaction
+
+    install_secret_redaction()
+    record = logging.LogRecord(
+        "uvicorn.error",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "WebSocket %s" [accepted]',
+        ("127.0.0.1:5000", "/v1/tts/stream?key=SUPER-SECRET&x=1"),
+        None,
+    )
+    for f in logging.getLogger("uvicorn.error").filters:
+        f.filter(record)
+    message = record.getMessage()
+    assert "SUPER-SECRET" not in message
+    assert "key=[REDACTED]&x=1" in message

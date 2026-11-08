@@ -73,18 +73,28 @@ from .voices import get_voice
 router = APIRouter()
 
 
+def _ws_token(websocket: WebSocket) -> str | None:
+    """The API key from ``Authorization: Bearer`` (servers, telephony
+    adapters) or, for browsers that cannot set headers, ``?key=``. The
+    header wins when both are present. The query form appears in server
+    access logs as ``key=[REDACTED]`` (see api/logging_config.py)."""
+    auth = websocket.headers.get("authorization", "")
+    if auth.lower().startswith("bearer ") and auth[7:].strip():
+        return auth[7:].strip()
+    return websocket.query_params.get("key")
+
+
 def _ws_authorized(websocket: WebSocket) -> tuple[bool, str | None]:
     """(authorized, error_code). Mirrors ``api/auth.py`` require_api_key.
 
-    WebSockets cannot carry an Authorization header from a browser, so
-    the key travels as a ``?key=`` query parameter and is compared in
-    constant time against the stored hash — never logged, never echoed.
+    Compared in constant time against the stored hash — never logged,
+    never echoed.
     """
     if not SETTINGS.api_key_hash and SETTINGS.allow_no_auth:
         return True, None
     if not SETTINGS.api_key_hash:
         return False, "auth_not_configured"
-    token = websocket.query_params.get("key")
+    token = _ws_token(websocket)
     if token is None or not hmac.compare_digest(hash_key(token), SETTINGS.api_key_hash):
         return False, "unauthorized"
     return True, None
@@ -369,7 +379,7 @@ async def ws_tts_stream(websocket: WebSocket) -> None:
         await websocket.send_json({"type": "error", "code": auth_error, "detail": detail})
         await websocket.close(code=1008)
         return
-    token = websocket.query_params.get("key") or ""
+    token = _ws_token(websocket) or ""
     logger.info("TTS stream WebSocket connected", extra={"fields": {}})
 
     try:
