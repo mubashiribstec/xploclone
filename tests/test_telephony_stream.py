@@ -150,3 +150,154 @@ def test_stream_two_turns_one_socket(client):
         assert first["type"] == "done"
         assert second["type"] == "done"
         assert first["samples"] == second["samples"] == 800
+
+
+# ── Review fixes (Claude Code review of PR #2, 2026-11-08) ──────────────────
+
+
+def _recv_until_done(ws):
+    start = ws.receive_json()
+    frames = []
+    while True:
+        message = ws.receive()
+        if message.get("bytes") is not None:
+            frames.append(message["bytes"])
+            continue
+        import json
+
+        return start, frames, json.loads(message["text"])
+
+
+def test_stream_different_preset_is_not_served_from_cache(client, monkeypatch):
+    from api.audio import sine_pcm16
+    from api.engine import REGISTRY
+
+    seen = []
+
+    def one(voice_id, chunk, prosody=None):
+        seen.append(prosody.preset)
+        return sine_pcm16(0.1)
+
+    monkeypatch.setattr(REGISTRY, "synthesize_one", one)
+    with client.websocket_connect("/v1/tts/stream?key=test-key") as ws:
+        for preset in ("natural", "firm"):
+            ws.send_json({"voice_id": "mubashir-en-gb", "text": "Hello world.", "preset": preset})
+            _recv_until_done(ws)
+    assert seen == ["natural", "firm"]
+
+
+def test_stream_cache_hit_reports_no_rtf(client):
+    """A cache hit synthesised nothing: rtf is null and cache says hit,
+    instead of a fake 'measured' rtf of 0.0."""
+    with client.websocket_connect("/v1/tts/stream?key=test-key") as ws:
+        ws.send_json({"voice_id": "mubashir-en-gb", "text": "Hello world."})
+        _, frames1, first = _recv_until_done(ws)
+        ws.send_json({"voice_id": "mubashir-en-gb", "text": "Hello world."})
+        _, frames2, second = _recv_until_done(ws)
+    assert first["cache"] == "miss" and isinstance(first["rtf"], float)
+    assert second["cache"] == "hit" and second["rtf"] is None
+    assert frames1 == frames2
+
+
+def test_stream_client_hangup_is_not_a_synthesis_failure(client, monkeypatch):
+    """A caller hanging up mid-stream used to be logged at ERROR, counted
+    as 503 synthesis_failed, and then raise out of the handler."""
+    import asyncio
+    import json
+    import time
+
+    import api.main as main
+    from api.audio import sine_pcm16
+    from api.engine import REGISTRY
+    from api.metrics import METRICS
+    from api.rate_limit import SYNTHESIS_QUEUE
+
+    def slow_one(voice_id, chunk, prosody=None):
+        time.sleep(0.02)
+        return sine_pcm16(0.1)
+
+    monkeypatch.setattr(REGISTRY, "synthesize_one", slow_one)
+    text = " ".join(f"Sentence number {i} is right here." for i in range(30))
+    failed_before = METRICS.errors_total["mubashir-en-us:synthesis_failed"]
+    hangups_before = METRICS.errors_total["mubashir-en-us:client_disconnected"]
+
+    async def scenario():
+        scope = {
+            "type": "websocket",
+            "path": "/v1/tts/stream",
+            "raw_path": b"/v1/tts/stream",
+            "query_string": b"key=test-key",
+            "root_path": "",
+            "scheme": "ws",
+            "http_version": "1.1",
+            "server": ("testserver", 80),
+            "client": ("127.0.0.1", 1),
+            "subprotocols": [],
+            "headers": [(b"host", b"testserver")],
+        }
+        request = json.dumps({"voice_id": "mubashir-en-us", "text": text})
+        inbox = [
+            {"type": "websocket.connect"},
+            {"type": "websocket.receive", "text": request},
+        ]
+        gone = asyncio.Event()
+
+        async def receive():
+            if inbox:
+                return inbox.pop(0)
+            await gone.wait()
+            return {"type": "websocket.disconnect", "code": 1006}
+
+        frames = {"n": 0}
+
+        async def send(message):
+            if message.get("bytes"):
+                frames["n"] += 1
+                if frames["n"] > 3:  # caller hangs up after 3 frames
+                    gone.set()
+                    raise OSError("connection reset by peer")
+
+        await main.app(scope, receive, send)  # must not raise
+        await asyncio.sleep(0.05)
+        return SYNTHESIS_QUEUE._sem.locked()
+
+    assert asyncio.run(scenario()) is False
+    assert METRICS.errors_total["mubashir-en-us:synthesis_failed"] == failed_before
+    assert METRICS.errors_total["mubashir-en-us:client_disconnected"] == hangups_before + 1
+
+
+def test_ws_accepts_bearer_header(client):
+    headers = {"Authorization": "Bearer test-key"}
+    with client.websocket_connect("/v1/tts/stream", headers=headers) as ws:
+        ws.send_json({"voice_id": "nope", "text": "x"})
+        assert ws.receive_json()["code"] == "unknown_voice"  # i.e. authorised
+
+
+def test_ws_bad_bearer_header_rejected(client):
+    headers = {"Authorization": "Bearer wrong"}
+    with client.websocket_connect("/v1/tts/stream?key=test-key", headers=headers) as ws:
+        assert ws.receive_json()["code"] == "unauthorized"  # header wins over query
+
+
+def test_uvicorn_websocket_log_line_is_redacted():
+    """uvicorn logs WebSocket paths with the query string; the ?key= value
+    must never reach the log (verified live against uvicorn 0.54.0)."""
+    import logging
+
+    from api.logging_config import install_secret_redaction
+
+    install_secret_redaction()
+    record = logging.LogRecord(
+        "uvicorn.error",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "WebSocket %s" [accepted]',
+        ("127.0.0.1:5000", "/v1/tts/stream?key=SUPER-SECRET&x=1"),
+        None,
+    )
+    for f in logging.getLogger("uvicorn.error").filters:
+        f.filter(record)
+    message = record.getMessage()
+    assert "SUPER-SECRET" not in message
+    assert "key=[REDACTED]&x=1" in message

@@ -75,4 +75,3 @@ RATE_LIMITER = RateLimiter(per_min=SETTINGS.rate_limit_per_min)
 SYNTHESIS_QUEUE = SynthesisQueue(
     max_waiters=SETTINGS.queue_max, timeout_s=float(SETTINGS.request_timeout_s)
 )
-

@@ -70,9 +70,7 @@ def lin2ulaw(pcm16: Any) -> bytes:
     """
     arr = np.asarray(pcm16)
     if arr.dtype.kind in ("f", "c"):
-        raise TypeError(
-            "lin2ulaw takes integer PCM; convert floats with float_to_pcm16 first"
-        )
+        raise TypeError("lin2ulaw takes integer PCM; convert floats with float_to_pcm16 first")
     if arr.dtype.kind not in ("i", "u", "b"):
         raise TypeError(f"lin2ulaw takes integer PCM, got dtype {arr.dtype}")
     pcm = np.clip(arr.astype(np.int64), -32768, 32767).astype(np.int32) >> 2  # 14-bit
@@ -146,7 +144,7 @@ def iter_frames(ulaw: bytes, frame_bytes: int = FRAME_BYTES) -> Any:
     """Split μ-law audio into fixed 20 ms frames; the tail is silence-padded
     so every frame the line receives is exactly ``frame_bytes`` long."""
     for start in range(0, len(ulaw), frame_bytes):
-        frame = ulaw[start:start + frame_bytes]
+        frame = ulaw[start : start + frame_bytes]
         if len(frame) < frame_bytes:
             frame = frame + bytes([ULAW_SILENCE]) * (frame_bytes - len(frame))
         yield frame

@@ -154,3 +154,49 @@ def test_cpu_smoke_sine_clip() -> None:
     pcm = sine_pcm16(0.5, freq_hz=440.0)
     assert len(pcm) > 0
     assert len(pcm) % 2 == 0
+
+
+def test_truncated_pcm16_stream_is_not_cached(client, monkeypatch) -> None:
+    """Review fix (2026-11-08): a stream that fails mid-way must not be
+    cached. Before the fix the partial audio was cached and the next
+    identical request got the truncated audio as a full 200 cache hit."""
+    from api.audio import sine_pcm16
+    from api.chunking import chunk_text
+    from api.engine import REGISTRY
+    from api.main import AUDIO_CACHE
+    from api.metrics import METRICS
+
+    AUDIO_CACHE.clear()
+    calls = {"n": 0}
+
+    def flaky_one(voice_id, chunk, prosody=None):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("simulated GPU failure")
+        return sine_pcm16(0.1)
+
+    monkeypatch.setattr(REGISTRY, "synthesize_one", flaky_one)
+    body = {
+        "voice_id": "mubashir-en-us",
+        "text": " ".join(f"This is sentence number {i} of a long passage." for i in range(12)),
+        "format": "pcm16",
+    }
+    assert len(chunk_text(body["text"])) >= 2  # the failure must hit chunk 2 of N
+    first = client.post("/v1/tts", json=body, headers=AUTH)
+    assert first.status_code == 200  # headers were already sent
+    assert "synthesis_failed" in METRICS.render_prometheus()
+    second = client.post("/v1/tts", json=body, headers=AUTH)
+    assert second.headers["X-Cache"] == "miss"
+
+
+def test_complete_pcm16_stream_is_cached(client) -> None:
+    from api.main import AUDIO_CACHE
+
+    AUDIO_CACHE.clear()
+    body = {"voice_id": "mubashir-en-us", "text": "Cache me please.", "format": "pcm16"}
+    first = client.post("/v1/tts", json=body, headers=AUTH)
+    second = client.post("/v1/tts", json=body, headers=AUTH)
+    assert first.headers["X-Cache"] == "miss"
+    assert second.headers["X-Cache"] == "hit"
+    assert second.content == first.content
+    assert second.headers["Content-Disposition"].endswith('.pcm16"')

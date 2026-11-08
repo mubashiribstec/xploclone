@@ -34,8 +34,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
-import os
 import secrets
 import threading
 import time
@@ -49,6 +47,7 @@ from .chunking import chunk_text
 from .engine import REGISTRY, EngineUnavailable
 from .logging_config import logger
 from .prosody import DEFAULT_PROSODY, ProsodySettings
+from .rate_limit import SYNTHESIS_QUEUE
 from .telephony_audio import FRAME_BYTES, PHONE_SAMPLE_RATE, ULAW_SILENCE, pcm16_to_ulaw
 
 END_MARK = "xploclone-end"
@@ -105,7 +104,9 @@ def token_subject(call_id: str, session_id: str = "") -> str:
 
 
 class CallTokens:
-    def __init__(self, ttl_s: float = TOKEN_TTL_S, max_pending: int = 64, clock: Any = time.monotonic):
+    def __init__(
+        self, ttl_s: float = TOKEN_TTL_S, max_pending: int = 64, clock: Any = time.monotonic
+    ):
         self._ttl = ttl_s
         self._max = max_pending
         self._clock = clock
@@ -252,14 +253,18 @@ class CallRegistry:
         now = time.time()
         with self._lock:
             self._recent.appendleft(
-                CallRecord(call=mask_call_id(call_id), started_at=now, ended_at=now, outcome=outcome)
+                CallRecord(
+                    call=mask_call_id(call_id), started_at=now, ended_at=now, outcome=outcome
+                )
             )
 
     def snapshot(self) -> dict:
         with self._lock:
             return {
                 "active": len(self._active),
-                "recent": [r.as_dict() for r in list(self._active.values()) + list(self._recent)][:20],
+                "recent": [r.as_dict() for r in list(self._active.values()) + list(self._recent)][
+                    :20
+                ],
             }
 
     def reset(self) -> None:
@@ -340,7 +345,9 @@ def note_signature_failure() -> None:
 Synthesizer = Callable[[str, list[str], ProsodySettings], AsyncIterator[tuple[bytes, int]]]
 
 
-def _speech_key(text: str, voice: str, language: str) -> tuple:
+def _speech_key(
+    text: str, voice: str, language: str, prosody: ProsodySettings = DEFAULT_PROSODY
+) -> tuple:
     """Everything the rendered audio depends on, resolved at call time.
 
     Keyed on what synthesis would actually use: the text, the voice, the
@@ -357,7 +364,10 @@ def _speech_key(text: str, voice: str, language: str) -> tuple:
             clip = (stat.st_size, stat.st_mtime_ns)
         except OSError:
             clip = None
-    return (text, voice, language or "", REGISTRY.engine_name, clip)
+    # Prosody is part of the key (review fix 2026-11-08): without it a
+    # "firm" request was answered with a cached "natural" render — a
+    # silent substitution. POST /v1/tts's cache already keys on it.
+    return (text, voice, language or "", REGISTRY.engine_name, clip, prosody.cache_fragment())
 
 
 class _Render:
@@ -371,6 +381,9 @@ class _Render:
         self.error: Exception | None = None
         self.cond = asyncio.Condition()
         self.task: asyncio.Task | None = None
+        #: The synthesizer producing this render. Only callers using the
+        #: same synthesizer join it (see render_ulaw).
+        self.synth: Synthesizer | None = None
         #: Callers currently streaming this render. When the last one leaves
         #: before it finishes (hang-up, time limit), synthesis is cancelled.
         self.consumers = 0
@@ -386,6 +399,14 @@ class _Render:
 _inflight: dict[tuple, _Render] = {}
 
 
+class EngineBusy(EngineUnavailable):
+    """The shared synthesis slot could not be acquired (queue full / timeout)."""
+
+    def __init__(self, voice_id: str, reason: str) -> None:
+        super().__init__(voice_id, reason)
+        self.code = "engine_busy"
+
+
 async def _xploclone_synthesizer(
     voice_id: str, chunks: list[str], prosody: ProsodySettings
 ) -> AsyncIterator[tuple[bytes, int]]:
@@ -396,10 +417,21 @@ async def _xploclone_synthesizer(
     call is idempotent, so the WebSocket handler's pre-check and this
     one cannot disagree.
     """
-    await asyncio.to_thread(REGISTRY.ensure_loaded, voice_id)
-    for chunk in chunks:
-        pcm = await asyncio.to_thread(REGISTRY.synthesize_one, voice_id, chunk, prosody)
-        yield pcm, SAMPLE_RATE
+    # Takes the shared synthesis slot (review fix 2026-11-08). PR #2 said
+    # HTTP and WebSocket share one slot, but this default synthesizer —
+    # the one run_call's responders use — skipped it, so a phone call
+    # could synthesise on the GPU alongside POST /v1/tts. The WebSocket
+    # handler acquires the slot itself and passes its own synthesizer,
+    # so it never reaches this function (no double acquire).
+    if not await SYNTHESIS_QUEUE.acquire():
+        raise EngineBusy(voice_id, "Synthesis queue is full or timed out.")
+    try:
+        await asyncio.to_thread(REGISTRY.ensure_loaded, voice_id)
+        for chunk in chunks:
+            pcm = await asyncio.to_thread(REGISTRY.synthesize_one, voice_id, chunk, prosody)
+            yield pcm, SAMPLE_RATE
+    finally:
+        SYNTHESIS_QUEUE.release()
 
 
 async def _produce(
@@ -451,14 +483,23 @@ async def render_ulaw(
     chunks = chunk_text(text)
     if not chunks:
         return
-    key = _speech_key(text, voice, language)
+    key = _speech_key(text, voice, language, resolved_prosody)
     cached = ulaw_cache.get(key)
     if cached is not None:
         yield cached
         return
     render = _inflight.get(key)
-    if render is None:
-        render = _inflight[key] = _Render()
+    if render is None or render.synth is not synth:
+        # Join an in-flight render only when it uses the same synthesizer
+        # (review fix 2026-11-08). A caller with its own synthesizer — the
+        # WebSocket's timing one, which already holds the synthesis slot —
+        # must not wait on a render whose producer may itself be waiting
+        # for that slot, and must not report another request's synthesis
+        # as its own. Such a render runs privately, outside _inflight.
+        render = _Render()
+        render.synth = synth
+        if key not in _inflight:
+            _inflight[key] = render
         render.task = asyncio.create_task(
             _produce(key, render, voice, chunks, resolved_prosody, synth)
         )
@@ -467,7 +508,12 @@ async def render_ulaw(
     try:
         while True:
             async with render.cond:
-                await render.cond.wait_for(lambda: sent < len(render.chunks) or render.done)
+                # Bind ``sent`` now (B023): the predicate is evaluated
+                # inside this iteration only, but binding makes that explicit.
+                def _ready(seen: int = sent) -> bool:
+                    return seen < len(render.chunks) or render.done
+
+                await render.cond.wait_for(_ready)
                 ready = render.chunks[sent:]
                 finished = render.done
             for chunk in ready:
@@ -496,7 +542,10 @@ async def render_ulaw_all(
     text: str, *, voice: str = "", language: str = "", prosody: ProsodySettings | None = None
 ) -> bytes:
     return b"".join(
-        [chunk async for chunk in render_ulaw(text, voice=voice, language=language, prosody=prosody)]
+        [
+            chunk
+            async for chunk in render_ulaw(text, voice=voice, language=language, prosody=prosody)
+        ]
     )
 
 
@@ -533,10 +582,11 @@ class Responder(Protocol):
 class AnnouncementResponder:
     def __init__(self, text: str, *, voice: str = "", language: str = ""):
         self._text = text
-        self._kw = {"voice": voice, "language": language}
+        self._voice = voice
+        self._language = language
 
     def speak(self) -> AsyncIterator[bytes]:
-        return render_ulaw(self._text, **self._kw)
+        return render_ulaw(self._text, voice=self._voice, language=self._language)
 
     async def on_inbound_audio(self, ulaw: bytes) -> None:
         return None  # announcement mode does not listen
@@ -599,7 +649,7 @@ async def run_call(
 
     try:
         start = await asyncio.wait_for(_await_start(), timeout=START_TIMEOUT_S)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         start = None
     if (
         start is None
@@ -646,7 +696,9 @@ async def run_call(
             pending += chunk
             whole = len(pending) - len(pending) % FRAME_BYTES
             for i in range(0, whole, FRAME_BYTES):
-                await websocket.send_json(provider.media_message(stream_id, pending[i:i + FRAME_BYTES]))
+                await websocket.send_json(
+                    provider.media_message(stream_id, pending[i : i + FRAME_BYTES])
+                )
                 sent += FRAME_BYTES
                 if (sent // FRAME_BYTES) % 50 == 0:
                     await asyncio.sleep(0)  # keep the receive side responsive
@@ -694,7 +746,9 @@ async def run_call(
                 break
             if send_task in done and send_task.exception() is not None:
                 exc = send_task.exception()
-                outcome = "engine_unavailable" if isinstance(exc, EngineUnavailable) else "synthesis_failed"
+                # engine_unavailable, or engine_busy when the shared
+                # synthesis slot could not be acquired (EngineBusy).
+                outcome = exc.code if isinstance(exc, EngineUnavailable) else "synthesis_failed"
                 # Class name only: the message may quote the greeting text.
                 logger.warning("Phone call audio failed (%s)", type(exc).__name__)
                 break

@@ -50,7 +50,6 @@ Audit fixes vs the VoiceStudio original (full list in
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import hmac
 import time
 from collections.abc import AsyncIterator
@@ -74,18 +73,28 @@ from .voices import get_voice
 router = APIRouter()
 
 
+def _ws_token(websocket: WebSocket) -> str | None:
+    """The API key from ``Authorization: Bearer`` (servers, telephony
+    adapters) or, for browsers that cannot set headers, ``?key=``. The
+    header wins when both are present. The query form appears in server
+    access logs as ``key=[REDACTED]`` (see api/logging_config.py)."""
+    auth = websocket.headers.get("authorization", "")
+    if auth.lower().startswith("bearer ") and auth[7:].strip():
+        return auth[7:].strip()
+    return websocket.query_params.get("key")
+
+
 def _ws_authorized(websocket: WebSocket) -> tuple[bool, str | None]:
     """(authorized, error_code). Mirrors ``api/auth.py`` require_api_key.
 
-    WebSockets cannot carry an Authorization header from a browser, so
-    the key travels as a ``?key=`` query parameter and is compared in
-    constant time against the stored hash — never logged, never echoed.
+    Compared in constant time against the stored hash — never logged,
+    never echoed.
     """
     if not SETTINGS.api_key_hash and SETTINGS.allow_no_auth:
         return True, None
     if not SETTINGS.api_key_hash:
         return False, "auth_not_configured"
-    token = websocket.query_params.get("key")
+    token = _ws_token(websocket)
     if token is None or not hmac.compare_digest(hash_key(token), SETTINGS.api_key_hash):
         return False, "unauthorized"
     return True, None
@@ -112,9 +121,7 @@ async def _timed_synthesizer(
         yield pcm, SAMPLE_RATE
 
 
-async def _handle_stream_request(
-    websocket: WebSocket, data: Any, token: str
-) -> None:
+async def _handle_stream_request(websocket: WebSocket, data: Any, token: str) -> None:
     """One request on an already-authenticated socket."""
     t0 = time.perf_counter()
     if not isinstance(data, dict):
@@ -134,7 +141,9 @@ async def _handle_stream_request(
             {
                 "type": "error",
                 "code": "unknown_voice",
-                "detail": "Unknown voice_id. Valid voices: mubashir-en-us, mubashir-en-gb, mubashir-ur.",
+                "detail": (
+                    "Unknown voice_id. Valid voices: mubashir-en-us, mubashir-en-gb, mubashir-ur."
+                ),
             }
         )
         return
@@ -162,9 +171,7 @@ async def _handle_stream_request(
         )
     except (ValueError, TypeError) as exc:
         METRICS.record(voice_id, "400", 0.0, error_code="invalid_preset")
-        await websocket.send_json(
-            {"type": "error", "code": "invalid_preset", "detail": str(exc)}
-        )
+        await websocket.send_json({"type": "error", "code": "invalid_preset", "detail": str(exc)})
         return
     allowed, retry_after = RATE_LIMITER.allow(hash_key(token))
     if not allowed:
@@ -211,9 +218,7 @@ async def _handle_stream_request(
         except EngineUnavailable as exc:
             latency_ms = (time.perf_counter() - t0) * 1000.0
             METRICS.record(voice_id, "503", latency_ms, error_code=exc.code)
-            await websocket.send_json(
-                {"type": "error", "code": exc.code, "detail": exc.reason}
-            )
+            await websocket.send_json({"type": "error", "code": exc.code, "detail": exc.reason})
             return
 
         async def synthesizer(
@@ -229,7 +234,10 @@ async def _handle_stream_request(
         pending = b""
         try:
             async for ulaw in render_ulaw(
-                norm, voice=voice_id, language=voice.language, prosody=prosody,
+                norm,
+                voice=voice_id,
+                language=voice.language,
+                prosody=prosody,
                 synthesizer=synthesizer,
             ):
                 if not started:
@@ -263,12 +271,19 @@ async def _handle_stream_request(
                 if first_audio_at is None:
                     first_audio_at = time.perf_counter()
                 sent_bytes += FRAME_BYTES
+        except WebSocketDisconnect:
+            # The client hung up mid-stream (review fix 2026-11-08). This is
+            # not an engine failure: it was logged at ERROR and counted as
+            # a 503 synthesis_failed, and the error frame sent to the closed
+            # socket then raised out of the handler. Count it as 499 and let
+            # the connection loop end cleanly.
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            METRICS.record(voice_id, "499", latency_ms, error_code="client_disconnected")
+            raise
         except EngineUnavailable as exc:
             latency_ms = (time.perf_counter() - t0) * 1000.0
             METRICS.record(voice_id, "503", latency_ms, error_code=exc.code)
-            await websocket.send_json(
-                {"type": "error", "code": exc.code, "detail": exc.reason}
-            )
+            await websocket.send_json({"type": "error", "code": exc.code, "detail": exc.reason})
             return
         except Exception as exc:  # noqa: BLE001 — m10: never leak a stack trace
             latency_ms = (time.perf_counter() - t0) * 1000.0
@@ -294,12 +309,15 @@ async def _handle_stream_request(
         finished_at = time.perf_counter()
         duration = round(sent_bytes / PHONE_SAMPLE_RATE, 3)
         ttfa_ms = (
-            round(max(0.0, first_audio_at - t0) * 1000.0, 1)
-            if first_audio_at is not None
-            else None
+            round(max(0.0, first_audio_at - t0) * 1000.0, 1) if first_audio_at is not None else None
         )
+        # Honest numbers (review fix 2026-11-08): when this request
+        # synthesised nothing — the audio came from the rendered-greeting
+        # cache — there is no RTF to report. It used to say rtf 0.0, which
+        # reads as a measurement. ``cache`` says where the audio came from.
+        synthesized = bool(synth_times)
         synth_time = sum(synth_times)
-        rtf = round(synth_time / duration, 3) if duration > 0 else None
+        rtf = round(synth_time / duration, 3) if synthesized and duration > 0 else None
         latency_ms = (finished_at - t0) * 1000.0
         METRICS.record(voice_id, "200", latency_ms, chars=len(text))
         logger.info(
@@ -312,6 +330,7 @@ async def _handle_stream_request(
                     "latency_ms": round(latency_ms, 1),
                     "ttfa_ms": ttfa_ms,
                     "rtf": rtf,
+                    "cache": "miss" if synthesized else "hit",
                     "watermark": "perth-unverified",
                     "preset": prosody.preset,
                 }
@@ -328,6 +347,7 @@ async def _handle_stream_request(
                 "gen_time_s": round(finished_at - t0, 6),
                 "ttfa_ms": ttfa_ms,
                 "rtf": rtf,
+                "cache": "miss" if synthesized else "hit",
                 "samples": sent_bytes,
                 "sample_rate": PHONE_SAMPLE_RATE,
                 "format": "ulaw",
@@ -359,7 +379,7 @@ async def ws_tts_stream(websocket: WebSocket) -> None:
         await websocket.send_json({"type": "error", "code": auth_error, "detail": detail})
         await websocket.close(code=1008)
         return
-    token = websocket.query_params.get("key") or ""
+    token = _ws_token(websocket) or ""
     logger.info("TTS stream WebSocket connected", extra={"fields": {}})
 
     try:

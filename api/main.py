@@ -413,9 +413,11 @@ def _audio_response(
     if payload.format == "pcm16":
         body = pcm16
         media_type = "audio/L16; rate=24000"
+        extension = "pcm16"
     else:
         body = pcm16_to_wav(pcm16, SAMPLE_RATE)
         media_type = "audio/wav"
+        extension = "wav"
 
     def _stream() -> Iterator[bytes]:
         yield body
@@ -430,7 +432,9 @@ def _audio_response(
             "X-Watermark": "perth-unverified",
             "X-Cache": cache,
             **_prosody_headers(prosody),
-            "Content-Disposition": f'attachment; filename="xploclone-{payload.voice_id}.wav"',
+            "Content-Disposition": (
+                f'attachment; filename="xploclone-{payload.voice_id}.{extension}"'
+            ),
         },
     )
 
@@ -453,6 +457,12 @@ def _streaming_pcm16_response(
     collected: list[bytes] = []
 
     async def _generate() -> AsyncIterator[bytes]:
+        # Only a stream that delivered EVERY chunk is cached or counted
+        # as a 200. A mid-stream engine failure (or a client hang-up)
+        # leaves a truncated body; caching it would serve that truncated
+        # audio as a full 200 cache hit to the next identical request.
+        completed = False
+        error_code: str | None = None
         try:
             for chunk in chunks:
                 try:
@@ -463,12 +473,14 @@ def _streaming_pcm16_response(
                     # Engine died mid-stream: log server-side; the client
                     # sees a truncated stream, which is why callers
                     # should treat a short body as a failure, not audio.
+                    error_code = exc.code
                     logger.error(
                         "streaming synthesis failed",
                         extra={"fields": {"voice_id": payload.voice_id, "error": exc.reason}},
                     )
                     return
                 except Exception as exc:  # noqa: BLE001 — same m10 rule
+                    error_code = "synthesis_failed"
                     logger.error(
                         "streaming synthesis failed",
                         extra={
@@ -481,12 +493,20 @@ def _streaming_pcm16_response(
                     return
                 collected.append(pcm)
                 yield pcm
+            completed = True
         finally:
             synthesis_queue.release()
-            if collected:
-                AUDIO_CACHE.put(cache_key, b"".join(collected))
             latency_ms = (time.monotonic() - started) * 1000.0
-            METRICS.record(payload.voice_id, "200", latency_ms, chars=len(payload.text))
+            if completed:
+                AUDIO_CACHE.put(cache_key, b"".join(collected))
+                METRICS.record(payload.voice_id, "200", latency_ms, chars=len(payload.text))
+            elif error_code is not None:
+                METRICS.record(payload.voice_id, "503", latency_ms, error_code=error_code)
+            else:
+                # Generator closed early: the client went away mid-stream.
+                METRICS.record(
+                    payload.voice_id, "499", latency_ms, error_code="client_disconnected"
+                )
 
     return StreamingResponse(
         _generate(),
@@ -506,4 +526,3 @@ def _streaming_pcm16_response(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):  # type: ignore[no-untyped-def]
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-
