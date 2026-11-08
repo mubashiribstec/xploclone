@@ -1,0 +1,37 @@
+# XploClone — CPU override file. Use it WITH the base file, never alone:
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
+# or simply:  ./install.sh --cpu
+#
+# What it changes vs the GPU base file:
+# - api uses Dockerfile.cpu (Python 3.14 + torch 2.14.1 CPU wheel, no CUDA)
+# - NO nvidia device reservation (the base file's GPU reservation is
+#   replaced here — if your Compose version does not honour the empty
+#   devices list, remove the deploy block from docker-compose.yml
+#   instead; see docs/TROUBLESHOOTING.md "GPU reservation on CPU")
+# - XPLOCLONE_DEVICE=cpu, XPLOCLONE_ENGINE=nano, XPLOCLONE_TORCH_THREADS=8
+# - Longer healthcheck start-period (CPU model load is slower)
+#
+# CPU mode is file generation only, never live calls. Nano's vendor
+# claim is 3x real-time on 8 CPU cores — unmeasured here; measure on
+# your hardware and record it in docs/BENCHMARK.md.
+# Docker build NOT tested in this environment (no Docker here).
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: xploclone-api-cpu:0.1.0
+    environment:
+      XPLOCLONE_DEVICE: cpu
+      XPLOCLONE_ENGINE: nano
+      XPLOCLONE_TORCH_THREADS: "8"
+    deploy:
+      resources:
+        reservations:
+          devices: []
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start-period: 180s
+      retries: 3

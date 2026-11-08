@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+# XploClone API image — Python 3.14.10, PyTorch 2.14.1 (CUDA 13.0 / cu130).
+# DEVIATION FROM PLAN-v2: the plan pins CUDA 12.8 (cu128), but no torch
+# 2.14.1 CUDA wheel exists for cu128 (tops out at 2.11.0) or cu129
+# (tops out at 2.13.0). The 2.14.1 CUDA wheel is cu130 — verified
+# 2026-10-30. See docs/BUILD-LOG.md. Base image follows the wheel (13.0).
+# GPU inference is NOT tested in CI (CPU-only); the image build is checked.
+FROM nvidia/cuda:13.0.0-runtime-ubuntu24.04
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_NO_CACHE=1 \
+    HF_HOME=/app/.cache/huggingface
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates ffmpeg libsndfile1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r appuser -g 10001 && useradd -r -u 10001 -g appuser appuser \
+    && mkdir -p /app/.cache/huggingface /app/api/reference \
+    && chown -R appuser:appuser /app/.cache /app/api/reference
+
+# uv (pinned installer behaviour: installs the latest stable uv at build;
+# the exact uv version used is recorded in docs/BUILD-LOG.md at build time).
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
+
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --python 3.14.10
+
+COPY api/ ./api/
+# NOTE: .env.example is deliberately NOT copied into this image (M7).
+# Secrets come from the host / compose env_file, never from the image.
+
+# Non-root (m12): the service mounts private recordings read-only and
+# serves a public repo's code — it has no business running as root.
+USER appuser
+
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+
+CMD ["uv", "run", "--no-sync", "--python", "3.14.10", \
+     "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

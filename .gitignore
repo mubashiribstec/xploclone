@@ -1,0 +1,55 @@
+# XploClone — never commit voices, keys, or outputs.
+.env
+.env.*
+!.env.example
+
+# Voice recordings and embeddings are sensitive personal data.
+# They live in a private encrypted store, never in this repo.
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.pt
+*.safetensors
+api/reference/*.wav
+api/reference/*.mp3
+api/reference/*.pt
+api/reference/*.safetensors
+!api/reference/.gitkeep
+!api/reference/README.md
+
+# API keys / secrets
+*.pem
+*.key
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+uv.lock.tmp
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node / Next.js
+web/node_modules/
+web/.next/
+web/out/
+web/*.tsbuildinfo
+node_modules/
+.next/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local outputs (benchmark audio, generated files)
+outputs/
+benchmark-output/
