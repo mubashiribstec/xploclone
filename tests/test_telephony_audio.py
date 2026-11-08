@@ -71,6 +71,34 @@ def test_ulaw2lin_matches_audioop_all_codes():
     assert ulaw2lin(data).tobytes() == audioop.ulaw2lin(data, 2)
 
 
+@needs_audioop
+def test_lin2ulaw_matches_audioop_exhaustive():
+    """Every one of the 65,536 int16 inputs (review addition 2026-11-08)."""
+    pcm = np.arange(-32768, 32768, dtype=np.int16)
+    assert lin2ulaw(pcm) == audioop.lin2ulaw(pcm.tobytes(), 2)
+
+
+# SHA-256 of CPython audioop's output over the WHOLE input domain, computed
+# 2026-11-08 with audioop-lts (the CPython C module back-ported to 3.13+)
+# on Python 3.14.6. Unlike the few golden vectors above, these pin every
+# input, and they run on every Python — no audioop needed.
+AUDIOOP_LIN2ULAW_ALL_INT16_SHA256 = (
+    "81d633c9e6972a18c74a58720b96cb8ca0bdd096d4060b646dd708c3b846019a"
+)
+AUDIOOP_ULAW2LIN_ALL_CODES_SHA256 = (
+    "3dab54339e520bb2c924826e3b72a917a2b612e9fd12fc867500f1d983a75827"
+)
+
+
+def test_exhaustive_golden_digests():
+    import hashlib
+
+    pcm = np.arange(-32768, 32768, dtype=np.int16)
+    assert hashlib.sha256(lin2ulaw(pcm)).hexdigest() == AUDIOOP_LIN2ULAW_ALL_INT16_SHA256
+    decoded = ulaw2lin(bytes(range(256))).tobytes()
+    assert hashlib.sha256(decoded).hexdigest() == AUDIOOP_ULAW2LIN_ALL_CODES_SHA256
+
+
 def test_golden_vectors():
     assert lin2ulaw(np.array(GOLDEN_PCM, dtype=np.int16)) == GOLDEN_ULAW
     assert ulaw2lin(GOLDEN_ULAW_IN).tolist() == GOLDEN_PCM_OUT

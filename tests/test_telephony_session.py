@@ -460,3 +460,67 @@ def test_run_call_time_limit():
     outcome = _run(ws, lambda start: SlowResponder(), max_seconds=0.05)
     assert outcome == "time_limit"
     assert ws.close_code == 1000
+
+
+# ── Review fixes (Claude Code review of PR #2, 2026-11-08) ──────────────────
+
+
+def test_render_ulaw_cache_is_keyed_on_prosody():
+    """A different preset must render fresh, never replay another preset's
+    cached audio (silent substitution)."""
+    from api.prosody import resolve_prosody
+
+    seen: list[str] = []
+
+    async def synth(voice_id, chunks, prosody):
+        seen.append(prosody.preset)
+        async for item in _fake_synth(voice_id, chunks, prosody):
+            yield item
+
+    kwargs = {"voice": "mubashir-en-gb", "language": "en-GB", "synthesizer": synth}
+    asyncio.run(_collect("Hello world.", prosody=resolve_prosody(preset="natural"), **kwargs))
+    asyncio.run(_collect("Hello world.", prosody=resolve_prosody(preset="firm"), **kwargs))
+    asyncio.run(_collect("Hello world.", prosody=resolve_prosody(preset="firm"), **kwargs))
+    assert seen == ["natural", "firm"]  # third call: genuine cache hit
+
+
+def test_render_ulaw_does_not_join_a_render_from_another_synthesizer():
+    a, b = _CountingSynth(), _CountingSynth()
+
+    async def both():
+        return await asyncio.gather(
+            _collect("Hello world.", voice="mubashir-en-gb", synthesizer=a),
+            _collect("Hello world.", voice="mubashir-en-gb", synthesizer=b),
+        )
+
+    out_a, out_b = asyncio.run(both())
+    assert out_a == out_b
+    assert len(a.calls) == 1 and len(b.calls) == 1
+
+
+def test_default_synthesizer_uses_the_shared_synthesis_slot(monkeypatch):
+    """run_call's default synthesizer must take the one synthesis slot that
+    POST /v1/tts and the WebSocket share; it used to skip it."""
+    import api.rate_limit as rate_limit
+    import api.telephony_session as session
+    from api.engine import REGISTRY
+    from api.rate_limit import SynthesisQueue
+
+    assert session.SYNTHESIS_QUEUE is rate_limit.SYNTHESIS_QUEUE
+    monkeypatch.setattr(REGISTRY, "ensure_loaded", lambda voice_id: None)
+    monkeypatch.setattr(REGISTRY, "synthesize_one", lambda v, c, p=None: sine_pcm16(0.1))
+
+    async def scenario():
+        # Fresh queue inside this loop: asyncio primitives bind to a loop.
+        queue = SynthesisQueue(max_waiters=2, timeout_s=0.05)
+        monkeypatch.setattr(session, "SYNTHESIS_QUEUE", queue)
+        assert await queue.acquire()  # someone else (POST /v1/tts) holds the GPU
+        with pytest.raises(session.EngineBusy):
+            await _collect("Busy line.", voice="mubashir-en-gb")
+        queue.release()
+        out = await _collect("Free line.", voice="mubashir-en-gb")
+        return out, queue._sem.locked()
+
+    out, still_locked = asyncio.run(scenario())
+    assert len(out) == 800 * len(chunk_text("Free line."))
+    assert not still_locked  # released after the render

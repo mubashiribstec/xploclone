@@ -261,6 +261,15 @@ async def _handle_stream_request(websocket: WebSocket, data: Any, token: str) ->
                 if first_audio_at is None:
                     first_audio_at = time.perf_counter()
                 sent_bytes += FRAME_BYTES
+        except WebSocketDisconnect:
+            # The client hung up mid-stream (review fix 2026-11-08). This is
+            # not an engine failure: it was logged at ERROR and counted as
+            # a 503 synthesis_failed, and the error frame sent to the closed
+            # socket then raised out of the handler. Count it as 499 and let
+            # the connection loop end cleanly.
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            METRICS.record(voice_id, "499", latency_ms, error_code="client_disconnected")
+            raise
         except EngineUnavailable as exc:
             latency_ms = (time.perf_counter() - t0) * 1000.0
             METRICS.record(voice_id, "503", latency_ms, error_code=exc.code)
@@ -292,8 +301,13 @@ async def _handle_stream_request(websocket: WebSocket, data: Any, token: str) ->
         ttfa_ms = (
             round(max(0.0, first_audio_at - t0) * 1000.0, 1) if first_audio_at is not None else None
         )
+        # Honest numbers (review fix 2026-11-08): when this request
+        # synthesised nothing — the audio came from the rendered-greeting
+        # cache — there is no RTF to report. It used to say rtf 0.0, which
+        # reads as a measurement. ``cache`` says where the audio came from.
+        synthesized = bool(synth_times)
         synth_time = sum(synth_times)
-        rtf = round(synth_time / duration, 3) if duration > 0 else None
+        rtf = round(synth_time / duration, 3) if synthesized and duration > 0 else None
         latency_ms = (finished_at - t0) * 1000.0
         METRICS.record(voice_id, "200", latency_ms, chars=len(text))
         logger.info(
@@ -306,6 +320,7 @@ async def _handle_stream_request(websocket: WebSocket, data: Any, token: str) ->
                     "latency_ms": round(latency_ms, 1),
                     "ttfa_ms": ttfa_ms,
                     "rtf": rtf,
+                    "cache": "miss" if synthesized else "hit",
                     "watermark": "perth-unverified",
                     "preset": prosody.preset,
                 }
@@ -322,6 +337,7 @@ async def _handle_stream_request(websocket: WebSocket, data: Any, token: str) ->
                 "gen_time_s": round(finished_at - t0, 6),
                 "ttfa_ms": ttfa_ms,
                 "rtf": rtf,
+                "cache": "miss" if synthesized else "hit",
                 "samples": sent_bytes,
                 "sample_rate": PHONE_SAMPLE_RATE,
                 "format": "ulaw",
