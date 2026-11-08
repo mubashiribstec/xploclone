@@ -37,9 +37,7 @@ try:
 except ImportError:  # Python 3.13+: audioop is gone; golden vectors pin the codec.
     audioop = None
 
-needs_audioop = pytest.mark.skipif(
-    audioop is None, reason="audioop removed in Python 3.13+"
-)
+needs_audioop = pytest.mark.skipif(audioop is None, reason="audioop removed in Python 3.13+")
 
 # VoiceStudio's own test vectors (backend/services/telephony/audio.py):
 # lin2ulaw([0, 0x1234, 0x4567, -0x4567, 0x7FFF, -0x8000, -1]).

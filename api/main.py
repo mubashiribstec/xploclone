@@ -526,4 +526,3 @@ def _streaming_pcm16_response(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):  # type: ignore[no-untyped-def]
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-

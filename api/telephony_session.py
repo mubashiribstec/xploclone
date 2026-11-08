@@ -34,8 +34,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
-import os
 import secrets
 import threading
 import time
@@ -105,7 +103,9 @@ def token_subject(call_id: str, session_id: str = "") -> str:
 
 
 class CallTokens:
-    def __init__(self, ttl_s: float = TOKEN_TTL_S, max_pending: int = 64, clock: Any = time.monotonic):
+    def __init__(
+        self, ttl_s: float = TOKEN_TTL_S, max_pending: int = 64, clock: Any = time.monotonic
+    ):
         self._ttl = ttl_s
         self._max = max_pending
         self._clock = clock
@@ -252,14 +252,18 @@ class CallRegistry:
         now = time.time()
         with self._lock:
             self._recent.appendleft(
-                CallRecord(call=mask_call_id(call_id), started_at=now, ended_at=now, outcome=outcome)
+                CallRecord(
+                    call=mask_call_id(call_id), started_at=now, ended_at=now, outcome=outcome
+                )
             )
 
     def snapshot(self) -> dict:
         with self._lock:
             return {
                 "active": len(self._active),
-                "recent": [r.as_dict() for r in list(self._active.values()) + list(self._recent)][:20],
+                "recent": [r.as_dict() for r in list(self._active.values()) + list(self._recent)][
+                    :20
+                ],
             }
 
     def reset(self) -> None:
@@ -467,7 +471,12 @@ async def render_ulaw(
     try:
         while True:
             async with render.cond:
-                await render.cond.wait_for(lambda: sent < len(render.chunks) or render.done)
+                # Bind ``sent`` now (B023): the predicate is evaluated
+                # inside this iteration only, but binding makes that explicit.
+                def _ready(seen: int = sent) -> bool:
+                    return seen < len(render.chunks) or render.done
+
+                await render.cond.wait_for(_ready)
                 ready = render.chunks[sent:]
                 finished = render.done
             for chunk in ready:
@@ -496,7 +505,10 @@ async def render_ulaw_all(
     text: str, *, voice: str = "", language: str = "", prosody: ProsodySettings | None = None
 ) -> bytes:
     return b"".join(
-        [chunk async for chunk in render_ulaw(text, voice=voice, language=language, prosody=prosody)]
+        [
+            chunk
+            async for chunk in render_ulaw(text, voice=voice, language=language, prosody=prosody)
+        ]
     )
 
 
@@ -533,10 +545,11 @@ class Responder(Protocol):
 class AnnouncementResponder:
     def __init__(self, text: str, *, voice: str = "", language: str = ""):
         self._text = text
-        self._kw = {"voice": voice, "language": language}
+        self._voice = voice
+        self._language = language
 
     def speak(self) -> AsyncIterator[bytes]:
-        return render_ulaw(self._text, **self._kw)
+        return render_ulaw(self._text, voice=self._voice, language=self._language)
 
     async def on_inbound_audio(self, ulaw: bytes) -> None:
         return None  # announcement mode does not listen
@@ -599,7 +612,7 @@ async def run_call(
 
     try:
         start = await asyncio.wait_for(_await_start(), timeout=START_TIMEOUT_S)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         start = None
     if (
         start is None
@@ -646,7 +659,9 @@ async def run_call(
             pending += chunk
             whole = len(pending) - len(pending) % FRAME_BYTES
             for i in range(0, whole, FRAME_BYTES):
-                await websocket.send_json(provider.media_message(stream_id, pending[i:i + FRAME_BYTES]))
+                await websocket.send_json(
+                    provider.media_message(stream_id, pending[i : i + FRAME_BYTES])
+                )
                 sent += FRAME_BYTES
                 if (sent // FRAME_BYTES) % 50 == 0:
                     await asyncio.sleep(0)  # keep the receive side responsive
@@ -694,7 +709,11 @@ async def run_call(
                 break
             if send_task in done and send_task.exception() is not None:
                 exc = send_task.exception()
-                outcome = "engine_unavailable" if isinstance(exc, EngineUnavailable) else "synthesis_failed"
+                outcome = (
+                    "engine_unavailable"
+                    if isinstance(exc, EngineUnavailable)
+                    else "synthesis_failed"
+                )
                 # Class name only: the message may quote the greeting text.
                 logger.warning("Phone call audio failed (%s)", type(exc).__name__)
                 break

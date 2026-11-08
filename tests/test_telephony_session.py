@@ -82,7 +82,9 @@ async def _collect(text, **kwargs):
 def test_render_ulaw_produces_8khz_ulaw():
     text = "Hello world."
     expected = fake_pcm16_to_ulaw(sine_pcm16(0.1), 24000) * len(chunk_text(text))
-    out = asyncio.run(_collect(text, voice="mubashir-en-gb", language="en-GB", synthesizer=_fake_synth))
+    out = asyncio.run(
+        _collect(text, voice="mubashir-en-gb", language="en-GB", synthesizer=_fake_synth)
+    )
     assert out == expected
     assert len(out) == 800 * len(chunk_text(text))  # 0.1 s of audio at 8 kHz
 
@@ -102,7 +104,9 @@ def test_render_ulaw_single_flight():
     kwargs = {"voice": "mubashir-en-gb", "language": "en-GB", "synthesizer": synth}
 
     async def both():
-        return await asyncio.gather(_collect("Hello world.", **kwargs), _collect("Hello world.", **kwargs))
+        return await asyncio.gather(
+            _collect("Hello world.", **kwargs), _collect("Hello world.", **kwargs)
+        )
 
     a, b = asyncio.run(both())
     assert a == b
@@ -128,19 +132,13 @@ def test_render_ulaw_propagates_engine_error():
 def test_render_ulaw_all_returns_bytes(monkeypatch):
     # render_ulaw_all uses the default synthesizer, so patch the module
     # global it resolves at call time.
-    monkeypatch.setattr(
-        "api.telephony_session._xploclone_synthesizer", _fake_synth
-    )
-    out = asyncio.run(
-        render_ulaw_all("Hello world.", voice="mubashir-en-gb", language="en-GB")
-    )
+    monkeypatch.setattr("api.telephony_session._xploclone_synthesizer", _fake_synth)
+    out = asyncio.run(render_ulaw_all("Hello world.", voice="mubashir-en-gb", language="en-GB"))
     assert out == fake_pcm16_to_ulaw(sine_pcm16(0.1), 24000)
 
 
 def test_announcement_responder_speaks(monkeypatch):
-    monkeypatch.setattr(
-        "api.telephony_session._xploclone_synthesizer", _fake_synth
-    )
+    monkeypatch.setattr("api.telephony_session._xploclone_synthesizer", _fake_synth)
     responder = AnnouncementResponder("Hello world.", voice="mubashir-en-gb", language="en-GB")
 
     async def collect():
@@ -302,8 +300,7 @@ class FakeWebSocket:
                 want = msg[len("<wait-end-mark:") : -1]
                 for _ in range(400):
                     if any(
-                        m.get("type") == "mark" and m.get("name") == END_MARK
-                        for m in self.sent
+                        m.get("type") == "mark" and m.get("name") == END_MARK for m in self.sent
                     ):
                         break
                     await asyncio.sleep(0.005)
@@ -365,7 +362,9 @@ def _run(ws, factory, max_seconds=5.0, max_calls=1):
 
 
 def test_run_call_rejects_missing_token():
-    ws = FakeWebSocket([json.dumps({"type": "start", "call_id": "call-1", "account_id": "acct-1", "params": {}})])
+    ws = FakeWebSocket(
+        [json.dumps({"type": "start", "call_id": "call-1", "account_id": "acct-1", "params": {}})]
+    )
     outcome = _run(ws, lambda start: FakeResponder([b"\xff" * 160]))
     assert outcome == "rejected_stream"
     assert ws.close_code == 1008

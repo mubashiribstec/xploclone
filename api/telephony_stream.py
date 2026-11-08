@@ -50,7 +50,6 @@ Audit fixes vs the VoiceStudio original (full list in
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import hmac
 import time
 from collections.abc import AsyncIterator
@@ -112,9 +111,7 @@ async def _timed_synthesizer(
         yield pcm, SAMPLE_RATE
 
 
-async def _handle_stream_request(
-    websocket: WebSocket, data: Any, token: str
-) -> None:
+async def _handle_stream_request(websocket: WebSocket, data: Any, token: str) -> None:
     """One request on an already-authenticated socket."""
     t0 = time.perf_counter()
     if not isinstance(data, dict):
@@ -134,7 +131,9 @@ async def _handle_stream_request(
             {
                 "type": "error",
                 "code": "unknown_voice",
-                "detail": "Unknown voice_id. Valid voices: mubashir-en-us, mubashir-en-gb, mubashir-ur.",
+                "detail": (
+                    "Unknown voice_id. Valid voices: mubashir-en-us, mubashir-en-gb, mubashir-ur."
+                ),
             }
         )
         return
@@ -162,9 +161,7 @@ async def _handle_stream_request(
         )
     except (ValueError, TypeError) as exc:
         METRICS.record(voice_id, "400", 0.0, error_code="invalid_preset")
-        await websocket.send_json(
-            {"type": "error", "code": "invalid_preset", "detail": str(exc)}
-        )
+        await websocket.send_json({"type": "error", "code": "invalid_preset", "detail": str(exc)})
         return
     allowed, retry_after = RATE_LIMITER.allow(hash_key(token))
     if not allowed:
@@ -211,9 +208,7 @@ async def _handle_stream_request(
         except EngineUnavailable as exc:
             latency_ms = (time.perf_counter() - t0) * 1000.0
             METRICS.record(voice_id, "503", latency_ms, error_code=exc.code)
-            await websocket.send_json(
-                {"type": "error", "code": exc.code, "detail": exc.reason}
-            )
+            await websocket.send_json({"type": "error", "code": exc.code, "detail": exc.reason})
             return
 
         async def synthesizer(
@@ -229,7 +224,10 @@ async def _handle_stream_request(
         pending = b""
         try:
             async for ulaw in render_ulaw(
-                norm, voice=voice_id, language=voice.language, prosody=prosody,
+                norm,
+                voice=voice_id,
+                language=voice.language,
+                prosody=prosody,
                 synthesizer=synthesizer,
             ):
                 if not started:
@@ -266,9 +264,7 @@ async def _handle_stream_request(
         except EngineUnavailable as exc:
             latency_ms = (time.perf_counter() - t0) * 1000.0
             METRICS.record(voice_id, "503", latency_ms, error_code=exc.code)
-            await websocket.send_json(
-                {"type": "error", "code": exc.code, "detail": exc.reason}
-            )
+            await websocket.send_json({"type": "error", "code": exc.code, "detail": exc.reason})
             return
         except Exception as exc:  # noqa: BLE001 — m10: never leak a stack trace
             latency_ms = (time.perf_counter() - t0) * 1000.0
@@ -294,9 +290,7 @@ async def _handle_stream_request(
         finished_at = time.perf_counter()
         duration = round(sent_bytes / PHONE_SAMPLE_RATE, 3)
         ttfa_ms = (
-            round(max(0.0, first_audio_at - t0) * 1000.0, 1)
-            if first_audio_at is not None
-            else None
+            round(max(0.0, first_audio_at - t0) * 1000.0, 1) if first_audio_at is not None else None
         )
         synth_time = sum(synth_times)
         rtf = round(synth_time / duration, 3) if duration > 0 else None
